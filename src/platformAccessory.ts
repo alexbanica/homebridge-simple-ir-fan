@@ -1,5 +1,5 @@
 import type { CharacteristicValue, PlatformAccessory, Service } from 'homebridge';
-import { SimpleFanIrPlatform } from './platform.js';
+import { SimpleIrFanPlatform } from './platform.js';
 import { ApiClient, AuthConfig, Endpoint, EndpointWithBody, FanStatus } from './api_client.js';
 
 export interface FanEndpoints {
@@ -21,7 +21,7 @@ export interface FanDeviceConfig {
     auth?: AuthConfig;
 }
 
-export class SimpleFanAccessory {
+export class SimpleIrFanAccessory {
   private service: Service;
   private apiClient: ApiClient;
   private on = false;
@@ -29,7 +29,7 @@ export class SimpleFanAccessory {
   private rotation = false;
 
   constructor(
-        private readonly platform: SimpleFanIrPlatform,
+        private readonly platform: SimpleIrFanPlatform,
         private readonly accessory: PlatformAccessory,
         private readonly device: FanDeviceConfig,
   ) {

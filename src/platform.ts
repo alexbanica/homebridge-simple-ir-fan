@@ -1,8 +1,8 @@
 import type { API, DynamicPlatformPlugin, Logger, PlatformAccessory, PlatformConfig } from 'homebridge';
 import { PLATFORM_NAME, PLUGIN_NAME } from './settings.js';
-import { SimpleFanAccessory, FanDeviceConfig } from './platformAccessory.js';
+import { SimpleIrFanAccessory, FanDeviceConfig } from './platformAccessory.js';
 
-export class SimpleFanIrPlatform implements DynamicPlatformPlugin {
+export class SimpleIrFanPlatform implements DynamicPlatformPlugin {
   public readonly accessories: PlatformAccessory[] = [];
 
   constructor(
@@ -38,13 +38,13 @@ export class SimpleFanIrPlatform implements DynamicPlatformPlugin {
       const existing = this.accessories.find(acc => acc.UUID === uuid);
       if (existing) {
         this.log.debug('Restoring existing accessory from cache:', existing.displayName);
-        new SimpleFanAccessory(this, existing, dev);
+        new SimpleIrFanAccessory(this, existing, dev);
         continue;
       }
 
       const accessory = new this.api.platformAccessory(dev.name, uuid);
       accessory.category = this.api.hap.Categories.FAN;
-      new SimpleFanAccessory(this, accessory, dev);
+      new SimpleIrFanAccessory(this, accessory, dev);
       this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
       this.accessories.push(accessory);
     }
