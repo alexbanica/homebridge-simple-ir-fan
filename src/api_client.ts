@@ -1,4 +1,5 @@
 import { setTimeout as delay } from 'timers/promises';
+import { Logger } from 'homebridge';
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
@@ -32,7 +33,11 @@ export interface FanStatus {
 }
 
 export class ApiClient {
-  constructor(private readonly log: { debug: (...a: unknown[]) => void; warn: (...a: unknown[]) => void; error: (...a: unknown[]) => void }) {}
+  private readonly log;
+  
+  constructor(log: Logger) {
+    this.log = log;
+  }
 
   async call<T = unknown>(opts: RequestOptions): Promise<T | undefined> {
     const url = this.buildUrl(opts.endpoint.uri, opts.endpoint.query, opts.variables);
