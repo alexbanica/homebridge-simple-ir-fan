@@ -33,14 +33,18 @@ export interface FanStatus {
 }
 
 export class ApiClient {
-  private readonly log;
+  private readonly log: Logger;
   
   constructor(log: Logger) {
     this.log = log;
   }
 
   async call<T = unknown>(opts: RequestOptions): Promise<T | undefined> {
-    const url = this.buildUrl(opts.endpoint.uri, opts.endpoint.query, opts.variables);
+    const url = this.buildUrl(
+      opts.endpoint.uri,
+      opts.endpoint.query,
+      opts.variables,
+    );
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       ...(opts.auth?.headers ?? {}),
@@ -81,11 +85,13 @@ export class ApiClient {
       } catch {
         return undefined;
       }
-    } catch (e: any) {
-      if (e?.name === 'AbortError') {
+    } catch (e: unknown) {
+      if (e instanceof Error && e.name === 'AbortError') {
         this.log.warn(`HTTP timeout for ${url}`);
+      } else if (e instanceof Error) {
+        this.log.error('HTTP error', e.message);
       } else {
-        this.log.error('HTTP error', e?.message ?? e);
+        this.log.error('HTTP error', String(e));
       }
       return undefined;
     } finally {
@@ -93,9 +99,13 @@ export class ApiClient {
     }
   }
 
-  private buildUrl(base: string, query?: Record<string, any>, vars?: Record<string, any>): string {
+  private buildUrl(
+    base: string,
+    query?: Record<string, string | number | boolean>,
+    vars?: Record<string, string | number | boolean | null | undefined>,
+  ): string {
     const u = new URL(this.interpolateString(base, vars));
-    const q = { ...(query ?? {}) };
+    const q: Record<string, string | number | boolean> = { ...(query ?? {}) };
     Object.entries(q).forEach(([k, v]) => {
       const sv = this.interpolateString(String(v), vars);
       u.searchParams.set(k, sv);
@@ -103,7 +113,10 @@ export class ApiClient {
     return u.toString();
   }
 
-  private interpolate(obj: Record<string, unknown>, vars?: Record<string, any>): Record<string, unknown> {
+  private interpolate(
+    obj: Record<string, unknown>,
+    vars?: Record<string, string | number | boolean | null | undefined>,
+  ): Record<string, unknown> {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(obj)) {
       if (typeof v === 'string') {
@@ -117,11 +130,17 @@ export class ApiClient {
     return out;
   }
 
-  private interpolateString(s: string, vars?: Record<string, any>): string {
+  private interpolateString(
+    s: string,
+    vars?: Record<string, string | number | boolean | null | undefined>,
+  ): string {
     if (!vars) {
       return s;
     }
-    return s.replace(/\$\{(\w+)\}/g, (_, k) => (vars[k] ?? '').toString());
+    return s.replace(/\$\{(\w+)}/g, (_, k: string) => {
+      const value = vars[k as keyof typeof vars];
+      return value == null ? '' : String(value);
+    });
   }
 
   // Optional: simple retry for GET status
