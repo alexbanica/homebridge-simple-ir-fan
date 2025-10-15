@@ -79,7 +79,7 @@
                   "properties": {
                     "start": { "$ref": "#/definitions/endpoint" },
                     "stop": { "$ref": "#/definitions/endpoint" },
-                    "setSpeed": { "$ref": "#/definitions/endpointWithBody" },
+                    "setSpeed": { "$ref": "#/definitions/endpoint" },
                     "startRotation": { "$ref": "#/definitions/endpoint" },
                     "stopRotation": { "$ref": "#/definitions/endpoint" },
                     "getStatus": { "$ref": "#/definitions/endpoint" }

@@ -90,14 +90,13 @@ export class SimpleIrFanAccessory {
       auth: this.device.auth,
     });
     if (status) {
-      if (typeof status.on === 'boolean') {
-        this.on = status.on;
-      }
+
+      this.on = status.isOn;
       if (typeof status.speed === 'number') {
         this.speed = Math.min(3, Math.max(1, Math.round(status.speed))) as 1 | 2 | 3;
       }
-      if (typeof status.rotation === 'boolean') {
-        this.rotation = status.rotation;
+      if (typeof status.isRotating === 'boolean') {
+        this.rotation = status.isRotating;
       }
       this.pushStateToHomeKit();
     }
@@ -142,8 +141,7 @@ export class SimpleIrFanAccessory {
   }
 
   private async handleSetRotationSpeed(value: CharacteristicValue) {
-    const percent = typeof value === 'number' ? value : 0;
-    const speed = this.percentToSpeed(percent);
+    const speed = this.percentToSpeed(value as number);
     if (!this.device.endpoints.setSpeed) {
       return;
     }
