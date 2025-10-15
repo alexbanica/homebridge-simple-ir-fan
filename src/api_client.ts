@@ -27,9 +27,9 @@ export interface RequestOptions {
 }
 
 export interface FanStatus {
-  on: boolean;
+  isOn: boolean;
   speed?: number; // 1..3
-  rotation?: boolean;
+  isRotating?: boolean;
 }
 
 export class ApiClient {
