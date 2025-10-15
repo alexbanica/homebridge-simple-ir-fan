@@ -28,8 +28,7 @@
     "homebridge": "^1.8.0 || ^2.0.0-beta.0"
   },
   "scripts": {
-    "clean": "rm -rf ./dist",
-    "build": "npm run clean && tsc",
+    "build": "rimraf ./dist && tsc",
     "prepare": "npm run build",
     "lint": "eslint . --max-warnings=0",
     "prepublishOnly": "npm run lint && npm run build",
