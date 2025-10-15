@@ -20,9 +20,9 @@ export interface RequestOptions {
     variables?: Record<string, string | number | boolean | null | undefined>;
 }
 export interface FanStatus {
-    on: boolean;
+    isOn: boolean;
     speed?: number;
-    rotation?: boolean;
+    isRotating?: boolean;
 }
 export declare class ApiClient {
     private readonly log;
