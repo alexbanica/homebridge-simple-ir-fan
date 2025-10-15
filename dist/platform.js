@@ -1,0 +1,52 @@
+import { PLATFORM_NAME, PLUGIN_NAME } from './settings.js';
+import { SimpleIrFanAccessory } from './platformAccessory.js';
+export class SimpleIrFanPlatform {
+    log;
+    config;
+    api;
+    accessories = [];
+    constructor(log, config, api) {
+        this.log = log;
+        this.config = config;
+        this.api = api;
+        this.log.debug('Finished initializing platform:', this.config?.name ?? PLATFORM_NAME);
+        if (!this.config || !Array.isArray(this.config.devices)) {
+            this.log.warn('No devices configured for SimpleFanApi.');
+            return;
+        }
+        this.api.on('didFinishLaunching', () => {
+            this.discoverDevices();
+        });
+    }
+    configureAccessory(accessory) {
+        this.log.debug('Loaded accessory from cache:', accessory.displayName);
+        this.accessories.push(accessory);
+    }
+    discoverDevices() {
+        const devices = this.config.devices ?? [];
+        const uuids = new Set();
+        for (const dev of devices) {
+            const uuid = this.api.hap.uuid.generate(`${dev.serialNumber}:${dev.name}`);
+            uuids.add(uuid);
+            const existing = this.accessories.find(acc => acc.UUID === uuid);
+            if (existing) {
+                this.log.debug('Restoring existing accessory from cache:', existing.displayName);
+                new SimpleIrFanAccessory(this, existing, dev);
+                continue;
+            }
+            const accessory = new this.api.platformAccessory(dev.name, uuid);
+            accessory.category = 3 /* this.api.hap.Categories.FAN */;
+            new SimpleIrFanAccessory(this, accessory, dev);
+            this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
+            this.accessories.push(accessory);
+        }
+        // Unregister accessories not present anymore
+        const toRemove = this.accessories.filter(a => !uuids.has(a.UUID));
+        if (toRemove.length) {
+            this.api.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, toRemove);
+            toRemove.forEach(a => this.log.warn('Removed accessory not in config:', a.displayName));
+            this.accessories.splice(0, this.accessories.length, ...this.accessories.filter(a => uuids.has(a.UUID)));
+        }
+    }
+}
+//# sourceMappingURL=platform.js.map
