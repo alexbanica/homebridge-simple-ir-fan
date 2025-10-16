@@ -76,7 +76,7 @@ export class FanService {
     fanDevice.on = speed > 0;
   }
 
-  public async setRotate(fanDevice: FanDevice, on: boolean) {
+  public async toggleRotate(fanDevice: FanDevice, on: boolean) {
     const ep = on ? fanDevice.config.endpoints.startRotation : fanDevice.config.endpoints.stopRotation;
     if (!ep) {
       return;

@@ -3,7 +3,7 @@ import { FanDeviceConfig } from './FanDeviceConfig.js';
 export class FanDevice {
 
   public on = false;
-  public speed = 33;
+  public speed = 0;
   public rotation = false;
   public config: FanDeviceConfig;
 

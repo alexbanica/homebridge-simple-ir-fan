@@ -63,7 +63,7 @@ export class SimpleIrFanAccessory {
   }
 
   private async handleGetSwingMode(): Promise<CharacteristicValue> {
-    return await this.fanService.getSpeed(this.fanDevice).finally(() => this.pushStateToHomeKit()) ? 1:0;
+    return await this.fanService.isRotating(this.fanDevice).finally(() => this.pushStateToHomeKit()) ? 1:0;
   }
 
   // Setters
@@ -73,14 +73,20 @@ export class SimpleIrFanAccessory {
   }
 
   private async handleSetRotationSpeed(value: CharacteristicValue) {
-    await this.fanService.setSpeed(this.fanDevice, value as number).finally(() => this.pushStateToHomeKit());
+    const speed = value as number;
+    const beforeSpeed = this.fanDevice.speed;
+    await this.fanService.setSpeed(this.fanDevice, speed).finally(() => this.pushStateToHomeKit());
     
-    if (this.fanDevice.speed > 0) {
+    if (beforeSpeed === 0 && speed > 0) {
       this.service.updateCharacteristic(this.platform.api.hap.Characteristic.Active, 1);
+    }
+
+    if (beforeSpeed > 0 && speed === 0) {
+      this.service.updateCharacteristic(this.platform.api.hap.Characteristic.Active, 0);
     }
   }
 
   private async handleSetSwingMode(value: CharacteristicValue) {
-    await this.fanService.setRotate(this.fanDevice, value === 1).finally(() => this.pushStateToHomeKit());
+    await this.fanService.toggleRotate(this.fanDevice, value === 1).finally(() => this.pushStateToHomeKit());
   }
 }
