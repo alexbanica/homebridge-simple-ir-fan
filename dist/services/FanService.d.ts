@@ -9,5 +9,5 @@ export declare class FanService {
     isRotating(fanDevice: FanDevice): Promise<boolean>;
     toggle(fanDevice: FanDevice, active: boolean): Promise<void>;
     setSpeed(fanDevice: FanDevice, value: number): Promise<void>;
-    setRotate(fanDevice: FanDevice, on: boolean): Promise<void>;
+    toggleRotate(fanDevice: FanDevice, on: boolean): Promise<void>;
 }

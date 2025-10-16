@@ -1,6 +1,6 @@
 export class FanDevice {
     on = false;
-    speed = 33;
+    speed = 0;
     rotation = false;
     config;
     constructor(config) {

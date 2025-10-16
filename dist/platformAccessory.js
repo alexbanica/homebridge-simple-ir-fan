@@ -48,7 +48,7 @@ export class SimpleIrFanAccessory {
         return await this.fanService.getSpeed(this.fanDevice).finally(() => this.pushStateToHomeKit());
     }
     async handleGetSwingMode() {
-        return await this.fanService.getSpeed(this.fanDevice).finally(() => this.pushStateToHomeKit()) ? 1 : 0;
+        return await this.fanService.isRotating(this.fanDevice).finally(() => this.pushStateToHomeKit()) ? 1 : 0;
     }
     // Setters
     async handleSetOn(value) {
@@ -56,13 +56,18 @@ export class SimpleIrFanAccessory {
         await this.fanService.toggle(this.fanDevice, active);
     }
     async handleSetRotationSpeed(value) {
-        await this.fanService.setSpeed(this.fanDevice, value).finally(() => this.pushStateToHomeKit());
-        if (this.fanDevice.speed > 0) {
+        const speed = value;
+        const beforeSpeed = this.fanDevice.speed;
+        await this.fanService.setSpeed(this.fanDevice, speed).finally(() => this.pushStateToHomeKit());
+        if (beforeSpeed === 0 && speed > 0) {
             this.service.updateCharacteristic(this.platform.api.hap.Characteristic.Active, 1);
+        }
+        if (beforeSpeed > 0 && speed === 0) {
+            this.service.updateCharacteristic(this.platform.api.hap.Characteristic.Active, 0);
         }
     }
     async handleSetSwingMode(value) {
-        await this.fanService.setRotate(this.fanDevice, value === 1).finally(() => this.pushStateToHomeKit());
+        await this.fanService.toggleRotate(this.fanDevice, value === 1).finally(() => this.pushStateToHomeKit());
     }
 }
 //# sourceMappingURL=platformAccessory.js.map
