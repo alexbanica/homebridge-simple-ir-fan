@@ -1,6 +1,7 @@
 import type { API, DynamicPlatformPlugin, Logger, PlatformAccessory, PlatformConfig } from 'homebridge';
 import { PLATFORM_NAME, PLUGIN_NAME } from './settings.js';
-import { SimpleIrFanAccessory, FanDeviceConfig } from './platformAccessory.js';
+import { SimpleIrFanAccessory } from './platformAccessory.js';
+import { FanDeviceConfig } from './dtos/FanDeviceConfig.js';
 
 export class SimpleIrFanPlatform implements DynamicPlatformPlugin {
   public readonly accessories: PlatformAccessory[] = [];
@@ -13,7 +14,7 @@ export class SimpleIrFanPlatform implements DynamicPlatformPlugin {
     this.log.debug('Finished initializing platform:', this.config?.name ?? PLATFORM_NAME);
 
     if (!this.config || !Array.isArray(this.config.devices)) {
-      this.log.warn('No devices configured for SimpleFanApi.');
+      this.log.warn('No devices configured for SimpleIrFanPlatform, skipping.');
       return;
     }
 
