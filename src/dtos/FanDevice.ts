@@ -12,7 +12,11 @@ export class FanDevice {
   }
 
   private speedToPercent(s: number): number {
-    if (s <= 1) {
+    if (s === 0) {
+      return 0;
+    }
+
+    if (s === 1) {
       return 33;
     }
     if (s === 2) {
@@ -21,7 +25,11 @@ export class FanDevice {
     return 100;
   }
 
-  private percentToSpeed(p: number): 1 | 2 | 3 {
+  private percentToSpeed(p: number): 0 | 1 | 2 | 3 {
+    if (p === 0) {
+      return 0;
+    }
+
     if (p <= 33) {
       return 1;
     }
