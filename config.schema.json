@@ -1,17 +1,121 @@
 {
-  "pluginAlias": "ExampleHomebridgePlugin",
+  "pluginAlias": "SimpleIrFan",
   "pluginType": "platform",
   "singular": true,
-  "strictValidation": false,
+  "strictValidation": true,
   "schema": {
     "type": "object",
-    "required": ["name"],
+    "required": ["platform", "name", "devices"],
     "additionalProperties": false,
     "properties": {
+      "platform": {
+        "title": "Platform Identifier",
+        "type": "string",
+        "const": "SimpleIrFan",
+        "default": "SimpleIrFan"
+      },
       "name": {
         "title": "Name",
         "type": "string",
-        "default": "Example Dynamic Platform"
+        "default": "SimpleIrFan"
+      },
+      "devices": {
+        "title": "Devices",
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "required": ["name", "manufacturer", "model", "serialNumber", "timeoutMs", "auth", "endpoints"],
+          "additionalProperties": false,
+          "properties": {
+            "name": { "type": "string", "title": "Accessory Name" },
+            "manufacturer": { "type": "string", "title": "Manufacturer" },
+            "model": { "type": "string", "title": "Model" },
+            "serialNumber": { "type": "string", "title": "Serial Number" },
+            "timeoutMs": {
+              "type": "integer",
+              "title": "Request Timeout (ms)",
+              "minimum": 1,
+              "default": 5000
+            },
+            "auth": {
+              "type": "object",
+              "title": "Authentication",
+              "additionalProperties": true,
+              "description": "Optional auth fields (e.g., headers, tokens)."
+            },
+            "endpoints": {
+              "type": "object",
+              "title": "Endpoints",
+              "required": ["start", "stop", "setSpeed", "startRotation", "stopRotation", "getStatus"],
+              "additionalProperties": false,
+              "properties": {
+                "start": {
+                  "$ref": "#/definitions/endpoint",
+                  "title": "Start"
+                },
+                "stop": {
+                  "$ref": "#/definitions/endpoint",
+                  "title": "Stop"
+                },
+                "setSpeed": {
+                  "$ref": "#/definitions/endpoint",
+                  "title": "Set Speed",
+                  "description": "Supports variable ${speed} in URI."
+                },
+                "startRotation": {
+                  "$ref": "#/definitions/endpoint",
+                  "title": "Start Oscillation"
+                },
+                "stopRotation": {
+                  "$ref": "#/definitions/endpoint",
+                  "title": "Stop Oscillation"
+                },
+                "getStatus": {
+                  "$ref": "#/definitions/endpoint",
+                  "title": "Get Status"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "endpoint": {
+      "type": "object",
+      "required": ["uri", "method"],
+      "additionalProperties": false,
+      "properties": {
+        "uri": {
+          "type": "string",
+          "format": "uri",
+          "title": "URI"
+        },
+        "method": {
+          "type": "string",
+          "title": "HTTP Method",
+          "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"]
+        },
+        "headers": {
+          "type": "object",
+          "title": "Headers",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "body": {
+          "type": ["object", "string", "null"],
+          "title": "Body (optional)",
+          "description": "JSON object or string payload. Leave null if not used.",
+          "default": null
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "title": "Endpoint Timeout (ms)",
+          "minimum": 1
+        }
       }
     }
   }
