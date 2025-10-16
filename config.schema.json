@@ -47,14 +47,13 @@
             "endpoints": {
               "type": "object",
               "title": "Endpoints",
-              "required": ["start", "stop", "setSpeed", "startRotation", "stopRotation", "getStatus"],
               "additionalProperties": false,
               "properties": {
                 "start": {
                   "type": "object",
                   "title": "Start",
                   "required": ["uri", "method"],
-                  "additionalProperties": false,
+                  "additionalProperties": true,
                   "properties": {
                     "uri": { "type": "string", "title": "URI" },
                     "method": {
@@ -83,7 +82,7 @@
                   "type": "object",
                   "title": "Stop",
                   "required": ["uri", "method"],
-                  "additionalProperties": false,
+                  "additionalProperties": true,
                   "properties": {
                     "uri": { "type": "string", "title": "URI" },
                     "method": {
@@ -113,7 +112,7 @@
                   "title": "Set Speed",
                   "description": "Supports variable ${speed} in URI.",
                   "required": ["uri", "method"],
-                  "additionalProperties": false,
+                  "additionalProperties": true,
                   "properties": {
                     "uri": { "type": "string", "title": "URI" },
                     "method": {
@@ -142,7 +141,7 @@
                   "type": "object",
                   "title": "Start Oscillation",
                   "required": ["uri", "method"],
-                  "additionalProperties": false,
+                  "additionalProperties": true,
                   "properties": {
                     "uri": { "type": "string", "title": "URI" },
                     "method": {
@@ -171,7 +170,7 @@
                   "type": "object",
                   "title": "Stop Oscillation",
                   "required": ["uri", "method"],
-                  "additionalProperties": false,
+                  "additionalProperties": true,
                   "properties": {
                     "uri": { "type": "string", "title": "URI" },
                     "method": {
@@ -200,7 +199,7 @@
                   "type": "object",
                   "title": "Get Status",
                   "required": ["uri", "method"],
-                  "additionalProperties": false,
+                  "additionalProperties": true,
                   "properties": {
                     "uri": { "type": "string", "title": "URI" },
                     "method": {
