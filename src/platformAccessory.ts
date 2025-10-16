@@ -73,17 +73,7 @@ export class SimpleIrFanAccessory {
   }
 
   private async handleSetRotationSpeed(value: CharacteristicValue) {
-    const speed = value as number;
-    const beforeSpeed = this.fanDevice.speed;
-    await this.fanService.setSpeed(this.fanDevice, speed).finally(() => this.pushStateToHomeKit());
-    
-    if (beforeSpeed === 0 && speed > 0) {
-      this.service.updateCharacteristic(this.platform.api.hap.Characteristic.Active, 1);
-    }
-
-    if (beforeSpeed > 0 && speed === 0) {
-      this.service.updateCharacteristic(this.platform.api.hap.Characteristic.Active, 0);
-    }
+    await this.fanService.setSpeed(this.fanDevice, value as number).finally(() => this.pushStateToHomeKit());
   }
 
   private async handleSetSwingMode(value: CharacteristicValue) {
