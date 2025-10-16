@@ -1,19 +1,20 @@
-import { ApiClient } from './api_client.js';
+import { ApiClient } from './infrastructure/apis/ApiClient.js';
+import { FanService } from './services/FanService.js';
+import { FanDevice } from './dtos/FanDevice.js';
 export class SimpleIrFanAccessory {
     platform;
     accessory;
     device;
     service;
-    apiClient;
-    on = false;
-    speed = 1;
-    rotation = false;
+    fanService;
+    fanDevice;
     constructor(platform, accessory, device) {
         this.platform = platform;
         this.accessory = accessory;
         this.device = device;
         const { api, log } = platform;
-        this.apiClient = new ApiClient(log);
+        this.fanService = new FanService(new ApiClient(log));
+        this.fanDevice = new FanDevice(device);
         accessory.getService(api.hap.Service.AccessoryInformation)
             .setCharacteristic(api.hap.Characteristic.Manufacturer, device.manufacturer)
             .setCharacteristic(api.hap.Characteristic.Model, device.model)
@@ -32,107 +33,36 @@ export class SimpleIrFanAccessory {
         this.service.getCharacteristic(api.hap.Characteristic.SwingMode)
             .onGet(this.handleGetSwingMode.bind(this))
             .onSet(this.handleSetSwingMode.bind(this));
-        // Initial status fetch
-        this.refreshFromStatus().catch(() => { });
-    }
-    speedToPercent(s) {
-        if (s <= 1) {
-            return 33;
-        }
-        if (s === 2) {
-            return 66;
-        }
-        return 100;
-    }
-    percentToSpeed(p) {
-        if (p <= 33) {
-            return 1;
-        }
-        if (p <= 66) {
-            return 2;
-        }
-        return 3;
-    }
-    async refreshFromStatus() {
-        const status = await this.apiClient.getStatusWithRetry({
-            endpoint: this.device.endpoints.getStatus,
-            timeoutMs: this.device.timeoutMs ?? 5000,
-            auth: this.device.auth,
-        });
-        if (status) {
-            this.on = status.isOn;
-            if (typeof status.speed === 'number') {
-                this.speed = Math.min(3, Math.max(1, Math.round(status.speed)));
-            }
-            if (typeof status.isRotating === 'boolean') {
-                this.rotation = status.isRotating;
-            }
-            this.pushStateToHomeKit();
-        }
+        this.fanService.refresh(this.fanDevice).catch(() => { });
     }
     pushStateToHomeKit() {
         const { api } = this.platform;
-        this.service.updateCharacteristic(api.hap.Characteristic.Active, this.on ? 1 : 0);
-        this.service.updateCharacteristic(api.hap.Characteristic.RotationSpeed, this.speedToPercent(this.speed));
-        this.service.updateCharacteristic(api.hap.Characteristic.SwingMode, this.rotation ? 1 : 0);
+        this.service.updateCharacteristic(api.hap.Characteristic.Active, this.fanDevice.on ? 1 : 0);
+        this.service.updateCharacteristic(api.hap.Characteristic.RotationSpeed, this.fanDevice.speed);
+        this.service.updateCharacteristic(api.hap.Characteristic.SwingMode, this.fanDevice.rotation ? 1 : 0);
     }
-    // Getters
     async handleGetOn() {
-        await this.refreshFromStatus().catch(() => { });
-        return this.on ? 1 : 0;
+        return await this.fanService.isOn(this.fanDevice).finally(() => this.pushStateToHomeKit()) ? 1 : 0;
     }
     async handleGetRotationSpeed() {
-        await this.refreshFromStatus().catch(() => { });
-        return this.speedToPercent(this.speed);
+        return await this.fanService.getSpeed(this.fanDevice).finally(() => this.pushStateToHomeKit());
     }
     async handleGetSwingMode() {
-        await this.refreshFromStatus().catch(() => { });
-        return this.rotation ? 1 : 0;
+        return await this.fanService.getSpeed(this.fanDevice).finally(() => this.pushStateToHomeKit()) ? 1 : 0;
     }
     // Setters
     async handleSetOn(value) {
         const active = value === 1;
-        const ep = active ? this.device.endpoints.start : this.device.endpoints.stop;
-        if (!ep) {
-            return;
-        }
-        await this.apiClient.call({
-            endpoint: ep,
-            timeoutMs: this.device.timeoutMs ?? 5000,
-            auth: this.device.auth,
-        });
-        this.on = active;
+        await this.fanService.toggle(this.fanDevice, active);
     }
     async handleSetRotationSpeed(value) {
-        const speed = this.percentToSpeed(value);
-        if (!this.device.endpoints.setSpeed) {
-            return;
-        }
-        await this.apiClient.call({
-            endpoint: this.device.endpoints.setSpeed,
-            timeoutMs: this.device.timeoutMs ?? 5000,
-            auth: this.device.auth,
-            variables: { speed },
-        });
-        this.speed = speed;
-        // If speed > 0, ensure Active=1 for better UX
-        if (speed > 0) {
-            this.on = true;
+        await this.fanService.setSpeed(this.fanDevice, value).finally(() => this.pushStateToHomeKit());
+        if (this.fanDevice.speed > 0) {
             this.service.updateCharacteristic(this.platform.api.hap.Characteristic.Active, 1);
         }
     }
     async handleSetSwingMode(value) {
-        const on = value === 1;
-        const ep = on ? this.device.endpoints.startRotation : this.device.endpoints.stopRotation;
-        if (!ep) {
-            return;
-        }
-        await this.apiClient.call({
-            endpoint: ep,
-            timeoutMs: this.device.timeoutMs ?? 5000,
-            auth: this.device.auth,
-        });
-        this.rotation = on;
+        await this.fanService.setRotate(this.fanDevice, value === 1).finally(() => this.pushStateToHomeKit());
     }
 }
 //# sourceMappingURL=platformAccessory.js.map

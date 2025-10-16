@@ -1,5 +1,5 @@
 import type { API, DynamicPlatformPlugin, Logger, PlatformAccessory, PlatformConfig } from 'homebridge';
-import { FanDeviceConfig } from './platformAccessory.js';
+import { FanDeviceConfig } from './dtos/FanDeviceConfig.js';
 export declare class SimpleIrFanPlatform implements DynamicPlatformPlugin {
     readonly log: Logger;
     readonly config: PlatformConfig & {

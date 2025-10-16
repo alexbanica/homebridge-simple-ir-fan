@@ -11,7 +11,7 @@ export class SimpleIrFanPlatform {
         this.api = api;
         this.log.debug('Finished initializing platform:', this.config?.name ?? PLATFORM_NAME);
         if (!this.config || !Array.isArray(this.config.devices)) {
-            this.log.warn('No devices configured for SimpleFanApi.');
+            this.log.warn('No devices configured for SimpleIrFanPlatform, skipping.');
             return;
         }
         this.api.on('didFinishLaunching', () => {
