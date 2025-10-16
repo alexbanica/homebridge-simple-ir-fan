@@ -25,7 +25,7 @@
         "minItems": 1,
         "items": {
           "type": "object",
-          "required": ["name", "manufacturer", "model", "serialNumber", "timeoutMs", "auth", "endpoints"],
+          "required": ["name", "manufacturer", "model", "serialNumber", "timeoutMs"],
           "additionalProperties": false,
           "properties": {
             "name": { "type": "string", "title": "Accessory Name" },
@@ -40,81 +40,193 @@
             },
             "auth": {
               "type": "object",
-              "title": "Authentication",
+              "title": "Authentication (optional)",
               "additionalProperties": true,
               "description": "Optional auth fields (e.g., headers, tokens)."
             },
             "endpoints": {
               "type": "object",
               "title": "Endpoints",
-              "required": ["start", "stop", "setSpeed", "startRotation", "stopRotation", "getStatus"],
               "additionalProperties": false,
               "properties": {
                 "start": {
-                  "$ref": "#/definitions/endpoint",
-                  "title": "Start"
+                  "type": "object",
+                  "title": "Start",
+                  "required": ["uri", "method"],
+                  "additionalProperties": true,
+                  "properties": {
+                    "uri": { "type": "string", "title": "URI" },
+                    "method": {
+                      "type": "string",
+                      "title": "HTTP Method",
+                      "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"]
+                    },
+                    "headers": {
+                      "type": "object",
+                      "title": "Headers",
+                      "additionalProperties": { "type": "string" }
+                    },
+                    "body": {
+                      "type": ["object", "string", "null"],
+                      "title": "Body (optional)",
+                      "default": null
+                    },
+                    "timeoutMs": {
+                      "type": "integer",
+                      "title": "Endpoint Timeout (ms)",
+                      "minimum": 1
+                    }
+                  }
                 },
                 "stop": {
-                  "$ref": "#/definitions/endpoint",
-                  "title": "Stop"
+                  "type": "object",
+                  "title": "Stop",
+                  "required": ["uri", "method"],
+                  "additionalProperties": true,
+                  "properties": {
+                    "uri": { "type": "string", "title": "URI" },
+                    "method": {
+                      "type": "string",
+                      "title": "HTTP Method",
+                      "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"]
+                    },
+                    "headers": {
+                      "type": "object",
+                      "title": "Headers",
+                      "additionalProperties": { "type": "string" }
+                    },
+                    "body": {
+                      "type": ["object", "string", "null"],
+                      "title": "Body (optional)",
+                      "default": null
+                    },
+                    "timeoutMs": {
+                      "type": "integer",
+                      "title": "Endpoint Timeout (ms)",
+                      "minimum": 1
+                    }
+                  }
                 },
                 "setSpeed": {
-                  "$ref": "#/definitions/endpoint",
+                  "type": "object",
                   "title": "Set Speed",
-                  "description": "Supports variable ${speed} in URI."
+                  "description": "Supports variable ${speed} in URI.",
+                  "required": ["uri", "method"],
+                  "additionalProperties": true,
+                  "properties": {
+                    "uri": { "type": "string", "title": "URI" },
+                    "method": {
+                      "type": "string",
+                      "title": "HTTP Method",
+                      "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"]
+                    },
+                    "headers": {
+                      "type": "object",
+                      "title": "Headers",
+                      "additionalProperties": { "type": "string" }
+                    },
+                    "body": {
+                      "type": ["object", "string", "null"],
+                      "title": "Body (optional)",
+                      "default": null
+                    },
+                    "timeoutMs": {
+                      "type": "integer",
+                      "title": "Endpoint Timeout (ms)",
+                      "minimum": 1
+                    }
+                  }
                 },
                 "startRotation": {
-                  "$ref": "#/definitions/endpoint",
-                  "title": "Start Oscillation"
+                  "type": "object",
+                  "title": "Start Oscillation",
+                  "required": ["uri", "method"],
+                  "additionalProperties": true,
+                  "properties": {
+                    "uri": { "type": "string", "title": "URI" },
+                    "method": {
+                      "type": "string",
+                      "title": "HTTP Method",
+                      "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"]
+                    },
+                    "headers": {
+                      "type": "object",
+                      "title": "Headers",
+                      "additionalProperties": { "type": "string" }
+                    },
+                    "body": {
+                      "type": ["object", "string", "null"],
+                      "title": "Body (optional)",
+                      "default": null
+                    },
+                    "timeoutMs": {
+                      "type": "integer",
+                      "title": "Endpoint Timeout (ms)",
+                      "minimum": 1
+                    }
+                  }
                 },
                 "stopRotation": {
-                  "$ref": "#/definitions/endpoint",
-                  "title": "Stop Oscillation"
+                  "type": "object",
+                  "title": "Stop Oscillation",
+                  "required": ["uri", "method"],
+                  "additionalProperties": true,
+                  "properties": {
+                    "uri": { "type": "string", "title": "URI" },
+                    "method": {
+                      "type": "string",
+                      "title": "HTTP Method",
+                      "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"]
+                    },
+                    "headers": {
+                      "type": "object",
+                      "title": "Headers",
+                      "additionalProperties": { "type": "string" }
+                    },
+                    "body": {
+                      "type": ["object", "string", "null"],
+                      "title": "Body (optional)",
+                      "default": null
+                    },
+                    "timeoutMs": {
+                      "type": "integer",
+                      "title": "Endpoint Timeout (ms)",
+                      "minimum": 1
+                    }
+                  }
                 },
                 "getStatus": {
-                  "$ref": "#/definitions/endpoint",
-                  "title": "Get Status"
+                  "type": "object",
+                  "title": "Get Status",
+                  "required": ["uri", "method"],
+                  "additionalProperties": true,
+                  "properties": {
+                    "uri": { "type": "string", "title": "URI" },
+                    "method": {
+                      "type": "string",
+                      "title": "HTTP Method",
+                      "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"]
+                    },
+                    "headers": {
+                      "type": "object",
+                      "title": "Headers",
+                      "additionalProperties": { "type": "string" }
+                    },
+                    "body": {
+                      "type": ["object", "string", "null"],
+                      "title": "Body (optional)",
+                      "default": null
+                    },
+                    "timeoutMs": {
+                      "type": "integer",
+                      "title": "Endpoint Timeout (ms)",
+                      "minimum": 1
+                    }
+                  }
                 }
               }
             }
           }
-        }
-      }
-    }
-  },
-  "definitions": {
-    "endpoint": {
-      "type": "object",
-      "required": ["uri", "method"],
-      "additionalProperties": false,
-      "properties": {
-        "uri": {
-          "type": "string",
-          "format": "uri",
-          "title": "URI"
-        },
-        "method": {
-          "type": "string",
-          "title": "HTTP Method",
-          "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"]
-        },
-        "headers": {
-          "type": "object",
-          "title": "Headers",
-          "additionalProperties": {
-            "type": "string"
-          }
-        },
-        "body": {
-          "type": ["object", "string", "null"],
-          "title": "Body (optional)",
-          "description": "JSON object or string payload. Leave null if not used.",
-          "default": null
-        },
-        "timeoutMs": {
-          "type": "integer",
-          "title": "Endpoint Timeout (ms)",
-          "minimum": 1
         }
       }
     }
