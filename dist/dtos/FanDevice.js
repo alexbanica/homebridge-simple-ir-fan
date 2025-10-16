@@ -7,7 +7,10 @@ export class FanDevice {
         this.config = config;
     }
     speedToPercent(s) {
-        if (s <= 1) {
+        if (s === 0) {
+            return 0;
+        }
+        if (s === 1) {
             return 33;
         }
         if (s === 2) {
@@ -16,6 +19,9 @@ export class FanDevice {
         return 100;
     }
     percentToSpeed(p) {
+        if (p === 0) {
+            return 0;
+        }
         if (p <= 33) {
             return 1;
         }
