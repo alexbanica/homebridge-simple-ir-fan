@@ -134,7 +134,7 @@ Install beta globally:
 - No analytics/tracking
 
 ## License
-MIT
+Apache License 2.0
 
 ## Author
 Ionut-Alexandru Banica
