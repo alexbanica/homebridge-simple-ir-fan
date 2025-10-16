@@ -27,7 +27,7 @@
           "method": "POST"
         },
         "stopRotation": {
-          "uri": "http://pi11.pi.home/api/ventilator/rotation",
+          "uri": "http://pi11.pi.home/api/ventilator/rotate",
           "method": "POST"
         },
         "getStatus": {
