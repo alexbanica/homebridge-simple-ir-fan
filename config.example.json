@@ -7,7 +7,7 @@
       "manufacturer": "Dynter",
       "model": "AV23-G",
       "serialNumber": "LRF-001",
-      "timeoutMs": 5000,
+      "timeoutMs": 8000,
       "auth": {},
       "endpoints": {
         "start": {
