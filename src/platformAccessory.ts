@@ -69,7 +69,7 @@ export class SimpleIrFanAccessory {
   // Setters
   private async handleSetOn(value: CharacteristicValue) {
     const active = value === 1;
-    await this.fanService.toggle(this.fanDevice, active);
+    await this.fanService.toggle(this.fanDevice, active).finally(() => this.pushStateToHomeKit());
   }
 
   private async handleSetRotationSpeed(value: CharacteristicValue) {
