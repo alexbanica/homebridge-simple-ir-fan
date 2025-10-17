@@ -3,7 +3,7 @@ import { FanDeviceConfig } from './FanDeviceConfig.js';
 export class FanDevice {
 
   private _on = false;
-  public speed = 0;
+  private _speed = 0;
   public rotation = false;
   public config: FanDeviceConfig;
   private readonly minDeviceSpeed: number;
@@ -64,5 +64,14 @@ export class FanDevice {
   }
   get on() {
     return this._on;
+  }
+
+  set speed(speed: number) {
+    this._speed = speed;
+    this._on = speed > this.minDeviceSpeed;
+  }
+
+  get speed() {
+    return this._speed;
   }
 }

@@ -60,7 +60,7 @@ export class FanService {
   }
 
   public async setSpeed(fanDevice: FanDevice, value: number) {
-    if (!fanDevice.config.endpoints.setSpeed) {
+    if (!fanDevice.config.endpoints.setSpeed || !fanDevice.on) {
       return;
     }
 
@@ -72,13 +72,11 @@ export class FanService {
       auth: fanDevice.config.auth,
       variables: { speed },
     });
-
-    fanDevice.on = speed > 0;
   }
 
   public async toggleRotate(fanDevice: FanDevice, on: boolean) {
     const ep = on ? fanDevice.config.endpoints.startRotation : fanDevice.config.endpoints.stopRotation;
-    if (!ep) {
+    if (!ep || !fanDevice.on) {
       return;
     }
     await this.apiClient.call({
