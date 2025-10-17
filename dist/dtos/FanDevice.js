@@ -1,14 +1,16 @@
 export class FanDevice {
-    on = false;
+    _on = false;
     speed = 0;
     rotation = false;
     config;
-    minSpeed;
-    maxSpeed;
+    minDeviceSpeed;
+    maxDeviceSpeed;
+    onDeviceSpeed;
     constructor(config) {
         this.config = config;
-        this.minSpeed = 0;
-        this.maxSpeed = 3;
+        this.minDeviceSpeed = 0;
+        this.onDeviceSpeed = 1;
+        this.maxDeviceSpeed = 3;
     }
     speedToPercent(s) {
         if (s === 0) {
@@ -38,8 +40,20 @@ export class FanDevice {
         return this.percentToSpeed(this.speed);
     }
     setDeviceSpeed(speed) {
-        speed = Math.min(this.maxSpeed, Math.max(this.minSpeed, Math.round(speed)));
+        speed = Math.min(this.maxDeviceSpeed, Math.max(this.minDeviceSpeed, Math.round(speed)));
         this.speed = this.speedToPercent(speed);
+    }
+    set on(on) {
+        this._on = on;
+        if (on) {
+            this.setDeviceSpeed(this.onDeviceSpeed);
+        }
+        else {
+            this.setDeviceSpeed(this.minDeviceSpeed);
+        }
+    }
+    get on() {
+        return this._on;
     }
 }
 //# sourceMappingURL=FanDevice.js.map
