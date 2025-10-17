@@ -1,6 +1,6 @@
 export class FanDevice {
     _on = false;
-    speed = 0;
+    _speed = 0;
     rotation = false;
     config;
     minDeviceSpeed;
@@ -54,6 +54,13 @@ export class FanDevice {
     }
     get on() {
         return this._on;
+    }
+    set speed(speed) {
+        this._speed = speed;
+        this._on = speed > this.minDeviceSpeed;
+    }
+    get speed() {
+        return this._speed;
     }
 }
 //# sourceMappingURL=FanDevice.js.map

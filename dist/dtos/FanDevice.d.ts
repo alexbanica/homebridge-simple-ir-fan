@@ -1,7 +1,7 @@
 import { FanDeviceConfig } from './FanDeviceConfig.js';
 export declare class FanDevice {
     private _on;
-    speed: number;
+    private _speed;
     rotation: boolean;
     config: FanDeviceConfig;
     private readonly minDeviceSpeed;
@@ -14,4 +14,6 @@ export declare class FanDevice {
     setDeviceSpeed(speed: number): void;
     set on(on: boolean);
     get on(): boolean;
+    set speed(speed: number);
+    get speed(): number;
 }
