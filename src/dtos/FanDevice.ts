@@ -6,9 +6,13 @@ export class FanDevice {
   public speed = 0;
   public rotation = false;
   public config: FanDeviceConfig;
+  private readonly minSpeed: number;
+  private readonly maxSpeed: number;
 
   constructor(config: FanDeviceConfig) {
     this.config = config;
+    this.minSpeed = 0;
+    this.maxSpeed = 3;
   }
 
   private speedToPercent(s: number): number {
@@ -44,6 +48,7 @@ export class FanDevice {
   }
 
   public setDeviceSpeed(speed: number): void {
+    speed = Math.min(this.maxSpeed, Math.max(this.minSpeed, Math.round(speed)));
     this.speed = this.speedToPercent(speed);
   }
 }
