@@ -34,7 +34,7 @@ export class FanService {
     }
     async toggle(fanDevice, active) {
         const ep = active ? fanDevice.config.endpoints.start : fanDevice.config.endpoints.stop;
-        if (!ep) {
+        if (!ep || fanDevice.on === active) {
             return;
         }
         await this.apiClient.call({
