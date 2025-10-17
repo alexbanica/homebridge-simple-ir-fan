@@ -3,8 +3,12 @@ export class FanDevice {
     speed = 0;
     rotation = false;
     config;
+    minSpeed;
+    maxSpeed;
     constructor(config) {
         this.config = config;
+        this.minSpeed = 0;
+        this.maxSpeed = 3;
     }
     speedToPercent(s) {
         if (s === 0) {
@@ -34,6 +38,7 @@ export class FanDevice {
         return this.percentToSpeed(this.speed);
     }
     setDeviceSpeed(speed) {
+        speed = Math.min(this.maxSpeed, Math.max(this.minSpeed, Math.round(speed)));
         this.speed = this.speedToPercent(speed);
     }
 }

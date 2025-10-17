@@ -4,6 +4,8 @@ export declare class FanDevice {
     speed: number;
     rotation: boolean;
     config: FanDeviceConfig;
+    private readonly minSpeed;
+    private readonly maxSpeed;
     constructor(config: FanDeviceConfig);
     private speedToPercent;
     private percentToSpeed;
