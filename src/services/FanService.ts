@@ -23,7 +23,7 @@ export class FanService {
 
     fanDevice.on = status.isOn;
     if (typeof status.speed === 'number') {
-      fanDevice.setDeviceSpeed(Math.min(3, Math.max(1, Math.round(status.speed))));
+      fanDevice.setDeviceSpeed(status.speed);
     }
 
     if (typeof status.isRotating === 'boolean') {
