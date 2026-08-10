@@ -1,13 +1,17 @@
 import type { PlatformAccessory } from 'homebridge';
-import { SimpleIrFanPlatform } from './platform.js';
-import { FanDeviceConfig } from './dtos/FanDeviceConfig.js';
+import type { FanDeviceConfig } from './dtos/FanDeviceConfig.js';
+import type { SimpleIrFanPlatform } from './platform.js';
 export declare class SimpleIrFanAccessory {
     private readonly platform;
     private readonly accessory;
-    private readonly device;
-    private service;
-    private fanService;
-    private fanDevice;
+    private readonly service;
+    private readonly fanService;
+    private readonly fanDevice;
+    private readonly fanResetService?;
+    private readonly resetSwitchService?;
+    private readonly accessoryName;
+    private readonly fanNameContext;
+    private resetActionPromise?;
     constructor(platform: SimpleIrFanPlatform, accessory: PlatformAccessory, device: FanDeviceConfig);
     private pushStateToHomeKit;
     private handleGetOn;
@@ -16,4 +20,14 @@ export declare class SimpleIrFanAccessory {
     private handleSetOn;
     private handleSetRotationSpeed;
     private handleSetSwingMode;
+    private createFanResetService;
+    private configureResetService;
+    private handleSetResetOn;
+    private startResetAction;
+    private handleGetResetOn;
+    private setResetCharacteristic;
+    private removeCachedResetSwitch;
+    private getResetSwitchService;
+    private isValidResetMethod;
+    private logResetConfigError;
 }
