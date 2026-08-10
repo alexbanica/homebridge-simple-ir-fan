@@ -1,22 +1,26 @@
 {
-  "name": "homebridge-plugin-name",
-  "displayName": "Plugin Name",
+  "name": "homebridge-simple-ir-fan",
+  "displayName": "SimpleIrFan",
   "type": "module",
   "version": "1.0.0",
   "private": true,
-  "description": "A short description about what your plugin does.",
-  "author": "Your Name",
+  "description": "Allows you to control a fan via HTTP API endpoints configured per action.",
+  "author": "Ionut Alexandru Banica",
   "license": "Apache-2.0",
-  "homepage": "https://github.com/USERNAME/GITHUB_PROJECT_NAME#readme",
+  "homepage": "https://github.com/alexbanica/homebridge-simple-ir-fan#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/USERNAME/GITHUB_PROJECT_NAME.git"
+    "url": "https://github.com/alexbanica/homebridge-simple-ir-fan.git"
   },
   "bugs": {
-    "url": "https://github.com/USERNAME/GITHUB_PROJECT_NAME/issues"
+    "url": "https://github.com/alexbanica/homebridge-simple-ir-fan/issues"
   },
   "keywords": [
-    "homebridge-plugin"
+    "homebridge-plugin",
+    "homebridge",
+    "plugin",
+    "fan",
+    "http"
   ],
   "main": "dist/index.js",
   "engines": {
@@ -25,6 +29,7 @@
   },
   "scripts": {
     "build": "rimraf ./dist && tsc",
+    "prepare": "npm run build",
     "lint": "eslint . --max-warnings=0",
     "prepublishOnly": "npm run lint && npm run build",
     "watch": "npm run build && npm link && nodemon"
@@ -42,5 +47,93 @@
     "ts-node": "^10.9.2",
     "typescript": "^5.9.2",
     "typescript-eslint": "^8.44.0"
+  },
+  "homebridge": {
+    "schema": {
+      "pluginAlias": "SimpleIrFan",
+      "pluginType": "platform",
+      "singular": true,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Platform Name",
+            "default": "SimpleIrFan"
+          },
+          "devices": {
+            "type": "array",
+            "title": "Fans",
+            "items": {
+              "type": "object",
+              "required": ["name", "manufacturer", "model", "serialNumber", "endpoints"],
+              "properties": {
+                "name": { "type": "string" },
+                "manufacturer": { "type": "string", "default": "Generic" },
+                "model": { "type": "string", "default": "Fan" },
+                "serialNumber": { "type": "string" },
+                "timeoutMs": { "type": "number", "default": 5000 },
+                "endpoints": {
+                  "type": "object",
+                  "required": ["getStatus"],
+                  "properties": {
+                    "start": { "$ref": "#/definitions/endpoint" },
+                    "stop": { "$ref": "#/definitions/endpoint" },
+                    "setSpeed": { "$ref": "#/definitions/endpoint" },
+                    "startRotation": { "$ref": "#/definitions/endpoint" },
+                    "stopRotation": { "$ref": "#/definitions/endpoint" },
+                    "getStatus": { "$ref": "#/definitions/endpoint" }
+                  }
+                },
+                "auth": {
+                  "type": "object",
+                  "properties": {
+                    "headers": {
+                      "type": "object",
+                      "additionalProperties": { "type": "string" }
+                    },
+                    "bearerToken": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "definitions": {
+          "endpoint": {
+            "type": "object",
+            "required": ["uri", "method"],
+            "properties": {
+              "uri": { "type": "string" },
+              "method": { "type": "string", "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+              "headers": {
+                "type": "object",
+                "additionalProperties": { "type": "string" }
+              },
+              "query": {
+                "type": "object",
+                "additionalProperties": { "type": ["string", "number", "boolean"] }
+              }
+            }
+          },
+          "endpointWithBody": {
+            "allOf": [
+              { "$ref": "#/definitions/endpoint" },
+              {
+                "type": "object",
+                "properties": {
+                  "bodyTemplate": {
+                    "type": "object",
+                    "description": "JSON body template where ${speed} will be replaced by 1..3"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "alias": "SimpleIrFan",
+    "platform": "SimpleIrFan"
   }
 }

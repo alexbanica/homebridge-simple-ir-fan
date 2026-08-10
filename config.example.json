@@ -1,0 +1,40 @@
+{
+  "platform": "SimpleIrFan",
+  "name": "SimpleIrFan",
+  "devices": [
+    {
+      "name": "Alex's ManCave Fan",
+      "manufacturer": "Dynter",
+      "model": "AV23-G",
+      "serialNumber": "LRF-001",
+      "timeoutMs": 8000,
+      "auth": {},
+      "endpoints": {
+        "start": {
+          "uri": "http://pi11.pi.home/api/ventilator/start",
+          "method": "POST"
+        },
+        "stop": {
+          "uri": "http://pi11.pi.home/api/ventilator/stop",
+          "method": "POST"
+        },
+        "setSpeed": {
+          "uri": "http://pi11.pi.home/api/ventilator/speed/${speed}",
+          "method": "PUT"
+        },
+        "startRotation": {
+          "uri": "http://pi11.pi.home/api/ventilator/rotate",
+          "method": "POST"
+        },
+        "stopRotation": {
+          "uri": "http://pi11.pi.home/api/ventilator/rotate",
+          "method": "POST"
+        },
+        "getStatus": {
+          "uri": "http://pi11.pi.home/api/ventilator/state",
+          "method": "GET"
+        }
+      }
+    }
+  ]
+}

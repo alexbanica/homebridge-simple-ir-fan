@@ -1,148 +1,82 @@
 import type { CharacteristicValue, PlatformAccessory, Service } from 'homebridge';
+import { SimpleIrFanPlatform } from './platform.js';
+import { ApiClient } from './infrastructure/apis/ApiClient.js';
+import { FanDeviceConfig } from './dtos/FanDeviceConfig.js';
+import { FanService } from './services/FanService.js';
+import { FanDevice } from './dtos/FanDevice.js';
 
-import type { ExampleHomebridgePlatform } from './platform.js';
 
-/**
- * Platform Accessory
- * An instance of this class is created for each accessory your platform registers
- * Each accessory may expose multiple services of different service types.
- */
-export class ExamplePlatformAccessory {
+
+export class SimpleIrFanAccessory {
   private service: Service;
-
-  /**
-   * These are just used to create a working example
-   * You should implement your own code to track the state of your accessory
-   */
-  private exampleStates = {
-    On: false,
-    Brightness: 100,
-  };
+  private fanService: FanService;
+  private fanDevice: FanDevice;
 
   constructor(
-    private readonly platform: ExampleHomebridgePlatform,
-    private readonly accessory: PlatformAccessory,
+        private readonly platform: SimpleIrFanPlatform,
+        private readonly accessory: PlatformAccessory,
+        private readonly device: FanDeviceConfig,
   ) {
-    // set accessory information
-    this.accessory.getService(this.platform.Service.AccessoryInformation)!
-      .setCharacteristic(this.platform.Characteristic.Manufacturer, 'Default-Manufacturer')
-      .setCharacteristic(this.platform.Characteristic.Model, 'Default-Model')
-      .setCharacteristic(this.platform.Characteristic.SerialNumber, 'Default-Serial');
+    const { api, log } = platform;
+    this.fanService = new FanService(new ApiClient(log));
+    this.fanDevice = new FanDevice(device);
 
-    // get the LightBulb service if it exists, otherwise create a new LightBulb service
-    // you can create multiple services for each accessory
+        accessory.getService(api.hap.Service.AccessoryInformation)!
+          .setCharacteristic(api.hap.Characteristic.Manufacturer, device.manufacturer)
+          .setCharacteristic(api.hap.Characteristic.Model, device.model)
+          .setCharacteristic(api.hap.Characteristic.SerialNumber, device.serialNumber);
 
-    if (accessory.context.device.CustomService) {
-      // This is only required when using Custom Services and Characteristics not support by HomeKit
-      this.service = this.accessory.getService(this.platform.CustomServices[accessory.context.device.CustomService]) ||
-        this.accessory.addService(this.platform.CustomServices[accessory.context.device.CustomService]);
-    } else {
-      this.service = this.accessory.getService(this.platform.Service.Lightbulb) || this.accessory.addService(this.platform.Service.Lightbulb);
-    }
+        this.service = accessory.getService(api.hap.Service.Fanv2) || accessory.addService(api.hap.Service.Fanv2, device.name);
 
-    // set the service name, this is what is displayed as the default name on the Home app
-    // in this example we are using the name we stored in the `accessory.context` in the `discoverDevices` method.
-    this.service.setCharacteristic(this.platform.Characteristic.Name, accessory.context.device.exampleDisplayName);
+        // On characteristic
+        this.service.getCharacteristic(api.hap.Characteristic.Active)
+          .onGet(this.handleGetOn.bind(this))
+          .onSet(this.handleSetOn.bind(this));
 
-    // each service must implement at-minimum the "required characteristics" for the given service type
-    // see https://developers.homebridge.io/#/service/Lightbulb
+        // RotationSpeed maps 1..3 to 0..100
+        this.service.getCharacteristic(api.hap.Characteristic.RotationSpeed)
+          .setProps({ minValue: 0, maxValue: 100, minStep: 1 })
+          .onGet(this.handleGetRotationSpeed.bind(this))
+          .onSet(this.handleSetRotationSpeed.bind(this));
 
-    // register handlers for the On/Off Characteristic
-    this.service.getCharacteristic(this.platform.Characteristic.On)
-      .onSet(this.setOn.bind(this)) // SET - bind to the `setOn` method below
-      .onGet(this.getOn.bind(this)); // GET - bind to the `getOn` method below
+        // Use SwingMode to represent oscillation On/Off (Start/Stop rotation)
+        this.service.getCharacteristic(api.hap.Characteristic.SwingMode)
+          .onGet(this.handleGetSwingMode.bind(this))
+          .onSet(this.handleSetSwingMode.bind(this));
 
-    // register handlers for the Brightness Characteristic
-    this.service.getCharacteristic(this.platform.Characteristic.Brightness)
-      .onSet(this.setBrightness.bind(this)); // SET - bind to the `setBrightness` method below
-
-    /**
-     * Creating multiple services of the same type.
-     *
-     * To avoid "Cannot add a Service with the same UUID another Service without also defining a unique 'subtype' property." error,
-     * when creating multiple services of the same type, you need to use the following syntax to specify a name and subtype id:
-     * this.accessory.getService('NAME') || this.accessory.addService(this.platform.Service.Lightbulb, 'NAME', 'USER_DEFINED_SUBTYPE_ID');
-     *
-     * The USER_DEFINED_SUBTYPE must be unique to the platform accessory (if you platform exposes multiple accessories, each accessory
-     * can use the same subtype id.)
-     */
-
-    // Example: add two "motion sensor" services to the accessory
-    const motionSensorOneService = this.accessory.getService('Motion Sensor One Name')
-      || this.accessory.addService(this.platform.Service.MotionSensor, 'Motion Sensor One Name', 'YourUniqueIdentifier-1');
-
-    const motionSensorTwoService = this.accessory.getService('Motion Sensor Two Name')
-      || this.accessory.addService(this.platform.Service.MotionSensor, 'Motion Sensor Two Name', 'YourUniqueIdentifier-2');
-
-    /**
-     * Updating characteristics values asynchronously.
-     *
-     * Example showing how to update the state of a Characteristic asynchronously instead
-     * of using the `on('get')` handlers.
-     * Here we change update the motion sensor trigger states on and off every 10 seconds
-     * the `updateCharacteristic` method.
-     *
-     */
-    let motionDetected = false;
-    setInterval(() => {
-      // EXAMPLE - inverse the trigger
-      motionDetected = !motionDetected;
-
-      // push the new value to HomeKit
-      motionSensorOneService.updateCharacteristic(this.platform.Characteristic.MotionDetected, motionDetected);
-      motionSensorTwoService.updateCharacteristic(this.platform.Characteristic.MotionDetected, !motionDetected);
-
-      this.platform.log.debug('Triggering motionSensorOneService:', motionDetected);
-      this.platform.log.debug('Triggering motionSensorTwoService:', !motionDetected);
-    }, 10000);
+        this.fanService.refresh(this.fanDevice).catch(() => {});
   }
 
-  /**
-   * Handle "SET" requests from HomeKit
-   * These are sent when the user changes the state of an accessory, for example, turning on a Light bulb.
-   */
-  async setOn(value: CharacteristicValue) {
-    // implement your own code to turn your device on/off
-    this.exampleStates.On = value as boolean;
-
-    this.platform.log.debug('Set Characteristic On ->', value);
+  private pushStateToHomeKit() {
+    const { api } = this.platform;
+    this.service.updateCharacteristic(api.hap.Characteristic.Active, this.fanDevice.on ? 1 : 0);
+    this.service.updateCharacteristic(api.hap.Characteristic.RotationSpeed, this.fanDevice.speed);
+    this.service.updateCharacteristic(api.hap.Characteristic.SwingMode, this.fanDevice.rotation ? 1 : 0);
   }
 
-  /**
-   * Handle the "GET" requests from HomeKit
-   * These are sent when HomeKit wants to know the current state of the accessory, for example, checking if a Light bulb is on.
-   *
-   * GET requests should return as fast as possible. A long delay here will result in
-   * HomeKit being unresponsive and a bad user experience in general.
-   *
-   * If your device takes time to respond you should update the status of your device
-   * asynchronously instead using the `updateCharacteristic` method instead.
-   * In this case, you may decide not to implement `onGet` handlers, which may speed up
-   * the responsiveness of your device in the Home app.
-
-   * @example
-   * this.service.updateCharacteristic(this.platform.Characteristic.On, true)
-   */
-  async getOn(): Promise<CharacteristicValue> {
-    // implement your own code to check if the device is on
-    const isOn = this.exampleStates.On;
-
-    this.platform.log.debug('Get Characteristic On ->', isOn);
-
-    // if you need to return an error to show the device as "Not Responding" in the Home app:
-    // throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
-
-    return isOn;
+  private async handleGetOn(): Promise<CharacteristicValue> {
+    return await this.fanService.isOn(this.fanDevice).finally(() => this.pushStateToHomeKit()) ? 1:0;
   }
 
-  /**
-   * Handle "SET" requests from HomeKit
-   * These are sent when the user changes the state of an accessory, for example, changing the Brightness
-   */
-  async setBrightness(value: CharacteristicValue) {
-    // implement your own code to set the brightness
-    this.exampleStates.Brightness = value as number;
+  private async handleGetRotationSpeed(): Promise<CharacteristicValue> {
+    return await this.fanService.getSpeed(this.fanDevice).finally(() => this.pushStateToHomeKit());
+  }
 
-    this.platform.log.debug('Set Characteristic Brightness -> ', value);
+  private async handleGetSwingMode(): Promise<CharacteristicValue> {
+    return await this.fanService.isRotating(this.fanDevice).finally(() => this.pushStateToHomeKit()) ? 1:0;
+  }
+
+  // Setters
+  private async handleSetOn(value: CharacteristicValue) {
+    const active = value === 1;
+    await this.fanService.toggle(this.fanDevice, active).finally(() => this.pushStateToHomeKit());
+  }
+
+  private async handleSetRotationSpeed(value: CharacteristicValue) {
+    await this.fanService.setSpeed(this.fanDevice, value as number).finally(() => this.pushStateToHomeKit());
+  }
+
+  private async handleSetSwingMode(value: CharacteristicValue) {
+    await this.fanService.toggleRotate(this.fanDevice, value === 1).finally(() => this.pushStateToHomeKit());
   }
 }
