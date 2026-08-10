@@ -2,7 +2,6 @@ import type { FanResetGatewayInterface } from '../services/FanResetGatewayInterf
 
 type FanResetGatewayFetch = (input: string | URL, init?: RequestInit) => Promise<Response>;
 
-const DEFAULT_API_BASE_URL = 'http://localhost:3000';
 const RESET_PATH = '/api/v1/fan/reset';
 const DEFAULT_TIMEOUT_MS = 5_000;
 
@@ -12,18 +11,17 @@ export interface DeviceIntegrationApiFanResetGatewayOptionsInterface {
 }
 
 export class DeviceIntegrationApiFanResetGateway implements FanResetGatewayInterface {
-  private readonly apiBaseUrl: URL;
+  private readonly requestUrl: URL;
   private readonly timeoutMs: number;
   private readonly fetchFn: FanResetGatewayFetch;
 
-  constructor(baseUrl: string | undefined, options: DeviceIntegrationApiFanResetGatewayOptionsInterface = {}) {
-    this.apiBaseUrl = this.normalizeApiBaseUrl(baseUrl);
+  constructor(resetUri: string | undefined, options: DeviceIntegrationApiFanResetGatewayOptionsInterface = {}) {
+    this.requestUrl = this.normalizeResetUri(resetUri);
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.fetchFn = options.fetch ?? fetch;
   }
 
   async reset(): Promise<void> {
-    const requestUrl = new URL(RESET_PATH, this.apiBaseUrl).toString();
     const abortController = new AbortController();
     const timeoutId = setTimeout(() => {
       abortController.abort();
@@ -41,7 +39,7 @@ export class DeviceIntegrationApiFanResetGateway implements FanResetGatewayInter
     try {
       const response = await Promise.race([
         timeoutPromise,
-        this.fetchFn(requestUrl, {
+        this.fetchFn(this.requestUrl, {
           method: 'POST',
           signal: abortController.signal,
         }),
@@ -56,7 +54,11 @@ export class DeviceIntegrationApiFanResetGateway implements FanResetGatewayInter
       }
 
       if (error instanceof Error) {
-        throw new Error(`Fan reset failed: ${error.message}`);
+        if (error.message.startsWith('Fan reset failed: unexpected status')) {
+          throw error;
+        }
+
+        throw new Error('Fan reset failed: request failed');
       }
 
       throw new Error('Fan reset failed with an unknown error');
@@ -65,21 +67,30 @@ export class DeviceIntegrationApiFanResetGateway implements FanResetGatewayInter
     }
   }
 
-  private normalizeApiBaseUrl(baseUrl?: string): URL {
-    const candidate = new URL(baseUrl ?? DEFAULT_API_BASE_URL);
+  private normalizeResetUri(rawUri: string | undefined): URL {
+    if (!rawUri) {
+      throw new Error('Invalid reset URI');
+    }
+
+    let candidate: URL;
+    try {
+      candidate = new URL(rawUri);
+    } catch (_error) {
+      throw new Error('Invalid reset URI');
+    }
 
     if (candidate.protocol !== 'http:' && candidate.protocol !== 'https:') {
-      throw new Error(`Invalid API base URL protocol: ${candidate.protocol}`);
+      throw new Error('Invalid reset URI');
     }
 
     if (candidate.username || candidate.password) {
-      throw new Error('Invalid API base URL: embedded credentials are not allowed.');
+      throw new Error('Invalid reset URI');
     }
 
-    if (candidate.pathname !== '/' || candidate.search || candidate.hash) {
-      throw new Error('Invalid API base URL; only origin values are supported.');
+    if (candidate.pathname !== RESET_PATH || candidate.search || candidate.hash) {
+      throw new Error('Invalid reset URI');
     }
 
-    return new URL(candidate.origin);
+    return candidate;
   }
 }

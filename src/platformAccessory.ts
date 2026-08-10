@@ -1,16 +1,32 @@
-import type { API, CharacteristicValue, Logger, PlatformAccessory, Service } from 'homebridge';
+import type { CharacteristicValue, Logger, PlatformAccessory, Service } from 'homebridge';
 
 import { FanDevice } from './dtos/FanDevice.js';
 import type { FanDeviceConfig } from './dtos/FanDeviceConfig.js';
+import { DeviceIntegrationApiFanResetGateway } from './fan/infrastructures/DeviceIntegrationApiFanResetGateway.js';
 import type { FanResetServiceInterface } from './fan/services/FanResetServiceInterface.js';
+import { FanResetService } from './fan/services/FanResetService.js';
 import { ApiClient } from './infrastructure/apis/ApiClient.js';
 import type { SimpleIrFanPlatform } from './platform.js';
 import { FanService } from './services/FanService.js';
+
+type FanResetEndpointConfig = {
+  uri: string;
+  method: 'POST';
+};
+
+const RESET_SERVICE_SUBTYPE = 'fan-reset';
+const RESET_OFFLINE_ERROR_MESSAGE = 'Fan reset failed for configured endpoint';
+const RESET_LOG_PREFIX = 'Fan reset';
 
 export class SimpleIrFanAccessory {
   private readonly service: Service;
   private readonly fanService: FanService;
   private readonly fanDevice: FanDevice;
+  private readonly fanResetService?: FanResetServiceInterface;
+  private readonly resetSwitchService?: Service;
+  private readonly accessoryName: string;
+  private readonly fanNameContext: string;
+  private resetActionPromise?: Promise<void>;
 
   constructor(
     private readonly platform: SimpleIrFanPlatform,
@@ -18,8 +34,16 @@ export class SimpleIrFanAccessory {
     device: FanDeviceConfig,
   ) {
     const { api, log } = platform;
-    this.fanService = new FanService(new ApiClient(log));
+    const safeLog = {
+      ...log,
+      debug: log.debug ?? (() => undefined),
+      warn: log.warn ?? (() => undefined),
+      log: log.log ?? (() => undefined),
+    };
+    this.fanService = new FanService(new ApiClient(safeLog as Logger));
     this.fanDevice = new FanDevice(device);
+    this.accessoryName = device.name;
+    this.fanNameContext = `${device.name} (${device.serialNumber})`;
 
     accessory.getService(api.hap.Service.AccessoryInformation)!
       .setCharacteristic(api.hap.Characteristic.Manufacturer, device.manufacturer)
@@ -40,6 +64,9 @@ export class SimpleIrFanAccessory {
     this.service.getCharacteristic(api.hap.Characteristic.SwingMode)
       .onGet(this.handleGetSwingMode.bind(this))
       .onSet(this.handleSetSwingMode.bind(this));
+
+    this.fanResetService = this.createFanResetService(device.endpoints as { reset?: FanResetEndpointConfig }, device.timeoutMs ?? 5_000);
+    this.resetSwitchService = this.configureResetService();
 
     this.fanService.refresh(this.fanDevice).catch(() => {});
   }
@@ -74,64 +101,138 @@ export class SimpleIrFanAccessory {
   private async handleSetSwingMode(value: CharacteristicValue): Promise<void> {
     await this.fanService.toggleRotate(this.fanDevice, value === 1).finally(() => this.pushStateToHomeKit());
   }
-}
 
-export interface FanResetHomebridgePlatformInterface {
-  readonly api: API;
-  readonly log: Logger;
-}
+  private createFanResetService(
+    endpoints: { reset?: FanResetEndpointConfig },
+    timeoutMs: number,
+  ): FanResetServiceInterface | undefined {
+    const resetEndpoint = endpoints.reset;
+    if (!resetEndpoint) {
+      this.removeCachedResetSwitch();
+      return undefined;
+    }
 
-export class FanResetPlatformAccessory {
-  private readonly service: Service;
+    if (!this.isValidResetMethod(resetEndpoint.method)) {
+      this.logResetConfigError('Invalid reset method.');
+      this.removeCachedResetSwitch();
+      return undefined;
+    }
 
-  constructor(
-    private readonly platform: FanResetHomebridgePlatformInterface,
-    private readonly accessory: PlatformAccessory,
-    private readonly fanResetService: FanResetServiceInterface,
-  ) {
-    const { api } = this.platform;
-
-    this.accessory.getService(api.hap.Service.AccessoryInformation)!
-      .setCharacteristic(api.hap.Characteristic.Manufacturer, 'Homebridge')
-      .setCharacteristic(api.hap.Characteristic.Model, 'Fan Reset Trigger')
-      .setCharacteristic(api.hap.Characteristic.SerialNumber, 'fan-reset-trigger');
-
-    this.service = this.accessory.getService(api.hap.Service.Switch)
-      || this.accessory.addService(api.hap.Service.Switch, this.accessory.displayName);
-    this.service.setCharacteristic(api.hap.Characteristic.Name, this.accessory.displayName);
-    this.setOnCharacteristic(false);
-
-    this.service.getCharacteristic(api.hap.Characteristic.On)
-      .onSet(this.setOn.bind(this))
-      .onGet(this.getOn.bind(this));
+    try {
+      const gateway = new DeviceIntegrationApiFanResetGateway(resetEndpoint.uri, { timeoutMs });
+      return new FanResetService(gateway);
+    } catch (_error) {
+      this.logResetConfigError('Invalid reset configuration.');
+      this.removeCachedResetSwitch();
+      return undefined;
+    }
   }
 
-  async setOn(value: CharacteristicValue): Promise<void> {
-    if (value !== true) {
-      this.setOnCharacteristic(false);
+  private configureResetService(): Service | undefined {
+    const { api, log } = this.platform;
+    const hasValidResetService = Boolean(this.fanResetService);
+    const cachedService = this.getResetSwitchService();
+
+    if (!hasValidResetService) {
+      if (cachedService) {
+        log.info(`${RESET_LOG_PREFIX} disabled for ${this.fanNameContext}.`);
+        this.accessory.removeService(cachedService);
+      }
+      return undefined;
+    }
+
+    const service = cachedService
+      || this.accessory.addService(api.hap.Service.Switch, 'Reset', RESET_SERVICE_SUBTYPE);
+    service.setCharacteristic(api.hap.Characteristic.Name, `${this.accessoryName} Reset`);
+    this.setResetCharacteristic(service, false);
+    service.getCharacteristic(api.hap.Characteristic.On)
+      .onSet(this.handleSetResetOn.bind(this))
+      .onGet(this.handleGetResetOn.bind(this));
+
+    return service;
+  }
+
+  private async handleSetResetOn(value: CharacteristicValue): Promise<void> {
+    const { hap } = this.platform.api;
+    const shouldReset = value === true || value === 1;
+
+    if (!shouldReset) {
+      this.setResetCharacteristic(this.resetSwitchService, false);
       return;
     }
 
-    this.setOnCharacteristic(true);
+    if (!this.fanResetService || !this.resetSwitchService) {
+      this.setResetCharacteristic(this.resetSwitchService, false);
+      return;
+    }
 
     try {
-      await this.fanResetService.reset();
-      this.platform.log.info('Fan reset triggered successfully.');
-      this.setOnCharacteristic(false);
+      await this.startResetAction();
     } catch (error) {
-      this.platform.log.error('Fan reset failed.', error);
-      this.setOnCharacteristic(false);
-      throw new this.platform.api.hap.HapStatusError(
-        this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
-      );
+      throw new hap.HapStatusError(hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
     }
   }
 
-  async getOn(): Promise<CharacteristicValue> {
-    return this.service.getCharacteristic(this.platform.api.hap.Characteristic.On).value as boolean;
+  private startResetAction(): Promise<void> {
+    if (!this.resetActionPromise) {
+      const { log } = this.platform;
+      this.setResetCharacteristic(this.resetSwitchService, true);
+      this.resetActionPromise = this.fanResetService!
+        .reset()
+        .then(() => {
+          log.info(`${RESET_LOG_PREFIX} completed for ${this.fanNameContext}.`);
+        })
+        .catch((error) => {
+          log.error(RESET_OFFLINE_ERROR_MESSAGE, this.fanNameContext, error);
+          throw error;
+        })
+        .finally(() => {
+          this.setResetCharacteristic(this.resetSwitchService, false);
+          this.resetActionPromise = undefined;
+        });
+    }
+    return this.resetActionPromise;
   }
 
-  private setOnCharacteristic(value: boolean): void {
-    this.service.updateCharacteristic(this.platform.api.hap.Characteristic.On, value);
+  private async handleGetResetOn(): Promise<CharacteristicValue> {
+    const service = this.resetSwitchService;
+    if (!service) {
+      return false;
+    }
+
+    return service.getCharacteristic(this.platform.api.hap.Characteristic.On).value as boolean;
+  }
+
+  private setResetCharacteristic(service: Service | undefined, value: boolean): void {
+    service?.getCharacteristic(this.platform.api.hap.Characteristic.On).updateValue(value);
+  }
+
+  private removeCachedResetSwitch(): void {
+    const existing = this.getResetSwitchService();
+    if (existing) {
+      this.accessory.removeService(existing);
+    }
+  }
+
+  private getResetSwitchService(): Service | undefined {
+    const services = (this.accessory as { services?: unknown }).services;
+
+    if (Array.isArray(services)) {
+      return services.find((service: { subtype?: string }) => service.subtype === RESET_SERVICE_SUBTYPE) as Service | undefined;
+    }
+
+    if (services instanceof Map) {
+      return services.get(this.platform.api.hap.Service.Switch) as Service | undefined;
+    }
+
+    return this.accessory.getService(this.platform.api.hap.Service.Switch);
+  }
+
+  private isValidResetMethod(method: string): method is 'POST' {
+    return method === 'POST';
+  }
+
+  private logResetConfigError(message: string): void {
+    this.platform.log.error(`${RESET_LOG_PREFIX} unavailable for ${this.fanNameContext}.`, message);
   }
 }

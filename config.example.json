@@ -1,7 +1,6 @@
 {
   "platform": "SimpleIrFan",
   "name": "SimpleIrFan",
-  "apiBaseUrl": "http://localhost:3000",
   "devices": [
     {
       "name": "Alex's ManCave Fan",
@@ -29,6 +28,10 @@
         },
         "stopRotation": {
           "uri": "http://pi11.pi.home/api/ventilator/rotate",
+          "method": "POST"
+        },
+        "reset": {
+          "uri": "http://pi11.pi.home/api/v1/fan/reset",
           "method": "POST"
         },
         "getStatus": {

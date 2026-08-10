@@ -3,214 +3,258 @@
 Status: Approved
 Date: 2026-08-10
 
+## Iteration: Optional Per-Fan Reset Control
+
+This iteration supersedes the previously approved platform-level reset
+accessory design.
+
+Delta from the previous behavior:
+
+- Move reset configuration from top-level `apiBaseUrl` to optional
+  `devices[].endpoints.reset`.
+- Expose reset as a secondary momentary Switch service on the same HomeKit
+  accessory as the configured fan.
+- Do not create or retain a separate reset accessory.
+- Preserve all existing Fanv2 power, speed, oscillation, status, authentication,
+  device identity, and cache behavior except where reset-service reconciliation
+  is explicitly described below.
+
 ## Purpose
 
-Expose the Device Integration API fan reset action in HomeKit so a user can
-deliberately reset the API-owned fan state from Homebridge.
+Allow each configured fan to opt into the Device Integration API reset action
+without creating a separate HomeKit accessory.
 
 ## Problem
 
-The Device Integration API provides `POST /api/v1/fan/reset`, but this
-Homebridge plugin has no control that invokes it. The checked-in plugin is still
-the Homebridge dynamic-platform example and exposes only example accessories
-whose state is local to the plugin.
+The current reset implementation creates one platform-level reset accessory and
+uses a global API base URL. A reset is conceptually an action for a configured
+fan, so its endpoint and HomeKit control should belong to that fan. Users who do
+not configure a reset endpoint should see no reset control.
 
 ## Scope
 
 In scope:
 
-- Expose one HomeKit Switch service that acts as a momentary fan reset trigger.
-- Add a Homebridge configuration value for the Device Integration API base URL.
-- Invoke the existing `POST /api/v1/fan/reset` contract without a request body.
-- Treat only HTTP `202 Accepted` as a successful reset.
-- Keep the trigger deterministic across success, failure, repeated writes,
-  Homebridge restarts, and cached-accessory restoration.
-- Contain configuration, network, protocol, and timeout failures so the plugin
-  does not produce unhandled exceptions.
-- Replace the checked-in example accessories and their synthetic state changes
-  with the single reset-trigger accessory.
+- Add optional `reset` configuration to each fan's existing `endpoints` object.
+- Represent reset with a momentary HomeKit Switch service attached to the same
+  `PlatformAccessory` as that fan's Fanv2 service.
+- Invoke the configured reset URI as a bodyless `POST`.
+- Treat only HTTP `202 Accepted` as success.
+- Keep reset behavior deterministic across success, failure, repeated writes,
+  Homebridge restarts, and cached fan-accessory restoration.
+- Remove the top-level `apiBaseUrl` configuration and platform-level reset
+  accessory behavior.
+- Remove a cached platform-level reset accessory through normal platform
+  reconciliation.
+- Add or remove the per-fan reset Switch service when a restored fan's reset
+  configuration is added or removed.
+- Preserve all existing configured fan controls and endpoint behavior.
 
 Out of scope:
 
-- Starting, stopping, rotating, changing speed, or otherwise controlling the
-  physical fan.
-- Querying `GET /api/v1/fan/state` or synchronizing API fan state into HomeKit.
-- Changing the Device Integration API, its OpenAPI contract, or its persistence
+- Changing existing fan start, stop, speed, rotation, or status behavior.
+- Querying fan status or changing Fanv2 characteristic state after reset.
+- Changing the Device Integration API, OpenAPI contract, or persistence
   behavior.
-- Adding authentication, authorization, retries, telemetry, command history, or
-  audit events.
-- Renaming or publishing the npm package, or changing plugin/platform public
-  identifiers beyond what is necessary to expose the reset trigger.
-- Providing a guarantee that the physical fan is OFF after reset. The API reset
-  action changes and persists application state only.
+- Adding reset authentication, request headers, request bodies, query
+  parameters, retries, telemetry, command history, or audit events.
+- Providing a guarantee that the physical fan is OFF after reset. Reset changes
+  and persists Device Integration API application state only.
+- Providing a native HomeKit push-button service. HomeKit exposes no native
+  button service for this use case, so a momentary Switch is used.
 
 ## Definitions
 
-- **Reset endpoint:** `POST /api/v1/fan/reset` from the Device Integration API
-  OpenAPI contract.
-- **Reset trigger:** A HomeKit Switch service used as a momentary action. It is
-  OFF while idle, becomes ON while its reset request is pending, and returns to
-  OFF when that request settles.
-- **API base URL:** The absolute HTTP or HTTPS origin of the Device Integration
-  API, without the versioned reset path. A single trailing slash is permitted.
-- **Reset in progress:** The interval from accepting an idle-to-ON HomeKit write
-  until the corresponding HTTP request succeeds, fails, or times out.
-- **Idle:** No reset request is in progress and the reset trigger reports OFF.
+- **Configured fan:** One entry in the platform's `devices` array.
+- **Reset endpoint:** Optional `devices[].endpoints.reset` configuration with an
+  absolute URI and method fixed to `POST`.
+- **Reset Switch:** A secondary HomeKit Switch service on the configured fan's
+  existing accessory. It is OFF while idle, ON while its request is pending,
+  and OFF again when the request settles.
+- **Reset in progress:** The interval from accepting an idle-to-ON reset write
+  until its HTTP request succeeds, fails, or times out.
+- **Idle:** No reset request is in progress for that configured fan.
 
 ## Inputs And Constraints
 
-- The Homebridge platform configuration retains the required `name` property.
-- The platform configuration adds optional `apiBaseUrl` as an absolute
-  `http://` or `https://` URL. When omitted, runtime behavior defaults it to
-  `http://localhost:3000`, matching the OpenAPI server URL.
-- `apiBaseUrl` represents an origin. Apart from an optional trailing slash, it
-  must not contain a path, query string, or fragment.
-- The reset request URL is the normalized API base URL followed by
-  `/api/v1/fan/reset` exactly once.
-- The request method is `POST` and the request has no body.
-- The request timeout is five seconds.
+- `devices[].endpoints.reset` is optional.
+- When omitted, that fan exposes no reset Switch and makes no reset request.
+- When present, `reset` contains:
+  - `uri`: an absolute `http://` or `https://` URI whose path is exactly
+    `/api/v1/fan/reset`;
+  - `method`: exactly `POST`.
+- The reset URI must not contain a query string, fragment, or embedded
+  credentials.
+- Reset configuration accepts no body template, headers, query parameters, or
+  authentication fields. Existing device authentication is not applied to the
+  reset request because the reset API contract is unauthenticated.
+- The reset request has no body.
+- Reset uses the configured fan's `timeoutMs`, defaulting to five seconds when
+  omitted.
 - Reset requests are not retried automatically.
-- The API contract defines no authentication for this endpoint, so the plugin
-  sends no authentication credentials.
-- The trigger accessory has one stable UUID that does not depend on the API base
-  URL, so changing the server address does not create a duplicate accessory.
+- Each configured fan has an independent reset service and in-flight request.
+- Concurrent reset writes for the same fan share one in-flight request.
+- Reset requests for different configured fans do not coalesce with one another.
+- The fan accessory UUID remains generated from its existing
+  `serialNumber:name` identity; adding, removing, or changing the reset endpoint
+  does not change accessory identity.
+- The reset Switch service uses a stable subtype within the fan accessory so
+  cached restoration does not create duplicate services.
 - Homebridge, HomeKit, HTTP, logging, filesystem, and runtime concerns remain
   outside domain and application contracts in accordance with the repository's
   onion-architecture dependency direction.
 
 ## Deterministic Behavior
 
-### 1. Platform startup and configuration
+### 1. Platform startup and reconciliation
 
-- With a valid configuration, the platform exposes exactly one reset-trigger
-  accessory and one Switch service for the configured platform `name`.
-- A newly created or restored trigger reports OFF when no reset is in progress.
-- Cached accessories from the checked-in example implementation are not exposed
-  as active devices and are removed through normal dynamic-platform accessory
-  reconciliation.
-- If a supplied `apiBaseUrl` is invalid at runtime, the platform logs a concise
-  configuration error, performs no outbound request, and exposes no usable reset
-  trigger. The configuration error must not escape as an unhandled exception.
+- The platform creates and restores configured fan accessories exactly as it
+  does today.
+- A fan with a valid reset endpoint has one Fanv2 service and one reset Switch
+  service on the same HomeKit accessory.
+- A fan without a reset endpoint has its existing Fanv2 service and no reset
+  Switch.
+- No platform-level reset accessory is registered.
+- A cached platform-level reset accessory from the superseded design is removed
+  because its UUID is not part of the configured fan UUID set.
+- On restoration, a newly configured reset endpoint adds the reset Switch to the
+  existing fan accessory without changing its UUID.
+- On restoration, removing reset configuration removes the cached reset Switch
+  from that fan accessory without removing the Fanv2 service.
+- If a supplied per-fan reset endpoint is invalid, the plugin logs a concise
+  device-specific configuration error without secrets, exposes no usable reset
+  Switch for that fan, and preserves the fan's other services and controls.
+- Configuration errors and service reconciliation errors are contained within
+  the plugin boundary.
 
-### 2. Idle trigger activation
+### 2. Idle reset activation
 
-- When HomeKit writes ON while the trigger is idle, the trigger starts exactly
-  one reset request and reports ON while that request is pending.
-- The request is `POST <normalized-api-base-url>/api/v1/fan/reset` with no
-  request body.
+- When HomeKit writes ON to an idle fan's reset Switch, that fan starts exactly
+  one reset request and the Switch reports ON while it is pending.
+- The request is a bodyless `POST` to the configured reset URI.
 - A `202 Accepted` response completes the action successfully. The response body
   is not parsed and does not affect the result.
-- After success, the trigger returns to OFF and Homebridge logs the successful
-  reset at an informational level.
-- Homebridge does not infer, query, or publish physical fan state after success.
+- After success, the reset Switch returns to OFF and Homebridge logs the fan's
+  successful reset at informational level.
+- Reset success does not change, query, or publish Fanv2 power, speed, or
+  oscillation characteristics.
 
 ### 3. OFF writes and concurrent activation
 
-- A HomeKit write of OFF never invokes the reset endpoint and leaves the trigger
-  OFF when idle.
-- If HomeKit writes ON while a reset is already in progress, the plugin does not
-  send another HTTP request. The write observes the result of the in-progress
-  reset and the trigger returns to OFF when that request settles.
-- After a completed request has returned the trigger to OFF, a later ON write is
-  a new deliberate activation and sends one new reset request.
+- An OFF write never invokes the reset endpoint and leaves the reset Switch OFF
+  when idle.
+- A second ON write for the same fan while reset is in progress sends no second
+  request and observes the shared in-flight result.
+- After settlement returns the Switch to OFF, a later ON write sends a new
+  request.
+- Concurrent ON writes on different fan accessories send one request per fan.
 
 ### 4. Failure handling
 
-- A timeout, network error, or any HTTP status other than `202` is a failed
-  reset.
-- On failure, the trigger returns to OFF, Homebridge records a concise error that
-  identifies the reset action without logging secrets, and the HomeKit write is
-  reported as a service communication failure.
-- A failed reset is not retried and does not prevent a later deliberate ON write
-  from trying again.
+- A timeout, network error, invalid runtime reset configuration, or any HTTP
+  status other than `202` is a failed reset.
+- On request failure, the reset Switch returns to OFF, Homebridge logs a concise
+  error identifying the configured fan without logging secrets, and HomeKit
+  reports `SERVICE_COMMUNICATION_FAILURE` for the reset write.
+- A failed reset is not retried and does not prevent that fan from accepting a
+  later deliberate reset.
+- Reset failure does not disable or change the fan's existing Fanv2 controls.
 - All asynchronous failures are caught within the plugin boundary; none may
   become an unhandled rejection or terminate Homebridge.
 
 ### 5. API action meaning
 
-- Successful invocation means the API accepted and persisted its default OFF
-  application state: `isOn=false`, `speed=0`, and `isRotating=false`.
-- The trigger does not claim that the API issued an IR command or reconciled the
-  physical fan. The referenced API reset contract explicitly excludes physical
-  fan commands.
+- Successful reset means the Device Integration API accepted and persisted its
+  default OFF application state: `isOn=false`, `speed=0`, and
+  `isRotating=false`.
+- The reset Switch does not claim the API issued an IR command or reconciled the
+  physical fan.
 
 ## Assumptions
 
-- Homebridge can reach the configured API base URL from its own runtime network.
-- The OpenAPI contract and approved API reset spec remain authoritative for the
-  endpoint method, path, lack of request body, and response statuses.
-- A momentary Switch is the intended HomeKit affordance for a user-initiated
-  action because HomeKit does not expose a native push-button service for this
-  plugin use case.
-- The current endpoint remains unauthenticated. Authentication requires a new
-  approved behavior change if the API contract changes.
-- Five seconds is sufficient for the API to persist its reset state under normal
-  operating conditions.
+- Homebridge can reach each configured reset URI from its runtime network.
+- The Device Integration API OpenAPI contract remains authoritative for the
+  reset path, method, lack of body, authentication, and response statuses.
+- A secondary momentary Switch on the existing fan accessory is the intended
+  HomeKit affordance. Home may render services as tiles, but reset remains part
+  of the same accessory and does not get a separate accessory UUID.
+- Existing configured-fan endpoint behavior on `origin/latest` remains the
+  regression baseline.
 
-## Regression Impact
+## Regression And Compatibility Impact
 
-- The three checked-in example accessories, Brightness handler, and periodic
-  synthetic MotionSensor changes cease to be active plugin behavior.
-- Existing Homebridge caches may contain those example accessories; discovery
-  must reconcile and remove them without duplicate UUIDs or repeated removals.
-- A reset endpoint failure affects only that trigger activation. The platform
-  remains loaded and later activations remain possible.
-- Changing `apiBaseUrl` changes the request destination but not the accessory
-  identity.
-- No change is permitted to the Device Integration API or to other fan endpoint
-  behavior.
+- Removing top-level `apiBaseUrl` is a configuration-breaking change from the
+  superseded reset implementation. Users must move reset configuration into
+  each intended fan's `endpoints.reset` entry.
+- Existing fan configurations without reset continue working and expose no
+  reset Switch.
+- Existing fan accessory UUIDs do not change.
+- Cached fan accessories gain or lose only the reset Switch service according
+  to current configuration.
+- The cached global reset accessory is unregistered once and is not recreated.
+- A reset failure affects only that fan's reset activation.
+- No change is permitted to existing fan endpoint requests or Fanv2 behavior.
 
 ## Validation Plan
 
 - Add deterministic tests proving:
-  - the omitted-base-URL default, valid explicit base URLs, optional
-    trailing-slash normalization, and rejection of invalid base URLs;
-  - one idle ON activation produces exactly one bodyless `POST` to the exact
-    reset path;
-  - only HTTP `202` is accepted as success;
-  - the trigger is OFF initially and after both success and failure;
+  - device configurations without `endpoints.reset` expose no reset Switch;
+  - valid per-fan reset configuration exposes one reset Switch on that fan's
+    existing accessory and creates no separate accessory;
+  - reset service addition/removal reconciles correctly on cached fan
+    accessories;
+  - the cached global reset accessory is removed;
+  - reset URIs reject non-HTTP(S), wrong paths, queries, fragments, credentials,
+    and non-POST methods without disabling other fan controls;
+  - the fan's `timeoutMs` and five-second default are applied;
+  - one idle ON activation produces exactly one bodyless POST to the configured
+    reset URI and only `202` succeeds;
   - OFF writes produce no request;
-  - concurrent ON writes share one in-progress request and do not duplicate the
-    action;
-  - timeout, network, and unexpected-status failures are contained and reported
-    as HomeKit service communication failures;
-  - a failed activation can be followed by a successful activation;
-  - cached example accessories are removed and the stable reset accessory is
-    restored without duplication.
-- Run `npm run lint`, `npm run build`, and `npm run prepublishOnly`.
-- Run the repository's implemented deterministic test command after a test
-  entry point is added.
-- Run `git diff --check`.
-- Verify the request against a local contract-compatible HTTP test server.
-- If an actual Homebridge/Home app and reachable Device Integration API are
-  unavailable, report that runtime/UI integration validation was not run and
-  keep implementation delivery in DRAFT status.
+  - same-fan concurrent ON writes coalesce while different-fan requests remain
+    independent;
+  - success and every failure return only the reset Switch to OFF;
+  - failures become HomeKit communication failures and remain retryable;
+  - existing fan registration, power, speed, rotation, and status tests remain
+    unchanged or are extended as regression coverage.
+- Validate both `config.schema.json` and the package-embedded Homebridge schema.
+- Run `npm test`, `npm run lint`, `npm run build`, `npm run prepublishOnly`, and
+  `git diff --check`.
+- Use local fakes or loopback HTTP only; do not contact a live API during
+  deterministic tests.
+- If Homebridge/Home runtime validation is unavailable, keep delivery DRAFT and
+  list the unverified same-accessory service presentation explicitly.
 
 ## Documentation Requirements
 
-- Replace template README guidance with configuration and behavior documentation
-  for `name`, `apiBaseUrl`, the momentary reset trigger, success/failure behavior,
-  and the fact that reset does not physically control the fan.
-- Keep `config.schema.json`, example Homebridge configuration, and runtime
-  validation aligned.
-- Reference the upstream Device Integration API reset contract without copying
-  or changing that contract in this repository.
+- Document optional `devices[].endpoints.reset` in README, both schemas, and
+  `config.example.json`.
+- Remove top-level `apiBaseUrl` documentation and schema entries.
+- Explain that reset is a momentary Switch service on the configured fan's
+  existing accessory, not a separate accessory.
+- Document the bodyless POST, exact `202` success rule, timeout, no-retry
+  behavior, unauthenticated request, failure behavior, and application-state-only
+  limitation.
+- Document migration from the superseded top-level `apiBaseUrl` configuration.
 
 ## Acceptance Criteria
 
-- A valid configuration exposes exactly one momentary HomeKit reset Switch.
-- One idle-to-ON activation sends exactly one bodyless
-  `POST /api/v1/fan/reset` request to the configured API origin.
-- Only `202 Accepted` is reported as success.
-- The trigger returns to OFF after every request outcome and OFF writes never
-  call the endpoint.
-- Concurrent activations do not create duplicate reset requests.
-- Failures are logged, surfaced to HomeKit as communication failures, and do not
-  escape the plugin boundary.
-- The plugin does not query or claim physical fan state and does not invoke any
-  other API action.
-- The existing example accessories and synthetic state changes are no longer
-  exposed.
-- Configuration schema, runtime behavior, tests, and README documentation agree.
-- Required deterministic validation passes, or the delivery is explicitly
-  reported as DRAFT with every unavailable validation step listed.
+- A configured fan without `endpoints.reset` has no reset control.
+- A configured fan with a valid reset endpoint has exactly one momentary reset
+  Switch service on its existing fan accessory.
+- The platform creates no separate reset accessory.
+- The fan accessory UUID is unchanged when reset configuration changes.
+- One idle activation sends exactly one bodyless POST to that fan's configured
+  reset URI; only `202 Accepted` succeeds.
+- The reset Switch returns to OFF after every outcome and OFF writes never call
+  the endpoint.
+- Concurrent activations coalesce per fan, not across fans.
+- Invalid reset configuration and request failures are contained, logged without
+  secrets, surfaced as HomeKit communication failures when applicable, and do
+  not affect existing fan controls.
+- Cached global reset accessories and stale per-fan reset services are removed.
+- Existing fan power, speed, rotation, status, authentication, identity, and
+  cache behavior remain unchanged.
+- Runtime configuration, both schemas, example configuration, tests, and README
+  agree.
+- Required deterministic validation passes, or delivery is explicitly DRAFT
+  with each unavailable validation step listed.

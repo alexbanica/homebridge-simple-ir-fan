@@ -29,6 +29,8 @@ class FakeCharacteristic {
 class FakeService {
   readonly characteristics = new Map<unknown, FakeCharacteristic>();
 
+  constructor(readonly type?: unknown, readonly subtype?: string) {}
+
   setCharacteristic(type: unknown, value: unknown) {
     this.getCharacteristic(type).updateValue(value);
     return this;
@@ -62,10 +64,18 @@ class FakePlatformAccessory {
     return this.services.get(type);
   }
 
-  addService(type: unknown) {
-    const service = new FakeService();
+  addService(type: unknown, _displayName?: string, subtype?: string) {
+    const service = new FakeService(type, subtype);
     this.services.set(type, service);
     return service;
+  }
+
+  removeService(service: FakeService) {
+    for (const [type, current] of this.services) {
+      if (current === service) {
+        this.services.delete(type);
+      }
+    }
   }
 }
 
@@ -125,106 +135,136 @@ function fixture(config: Record<string, unknown> = { name: 'Reset Fan', devices:
   };
 }
 
-test('omitted API base URL uses the approved localhost default', () => {
-  const view = fixture();
-  assert.equal(view.platform.apiBaseUrl, 'http://localhost:3000');
+const fanConfig = (name = 'Living Room Fan', reset = true) => ({
+  name,
+  manufacturer: 'Generic',
+  model: 'IR Fan',
+  serialNumber: 'FAN-001',
+  endpoints: {
+    getStatus: { uri: 'http://fan.example.test/state', method: 'GET' },
+    ...(reset ? { reset: { uri: 'http://fan.example.test/api/v1/fan/reset', method: 'POST' } } : {}),
+  },
 });
 
-test('invalid supplied API base URL is contained and exposes no reset trigger', () => {
-  const view = fixture({ name: 'Reset Fan', devices: [], apiBaseUrl: 'http://api.example.test/v1' });
-  assert.doesNotThrow(() => view.launch());
-  assert.equal(view.registered.length, 0);
-  assert.equal(view.logs.error.length, 1);
-});
-
-test('supplied non-string and null API base URLs are contained', () => {
-  for (const apiBaseUrl of [42, null]) {
-    const view = fixture({ name: 'Reset Fan', devices: [], apiBaseUrl });
-    assert.doesNotThrow(() => view.launch());
-    assert.equal(view.registered.length, 0);
-    assert.equal(view.logs.error.length, 1);
-  }
-});
-
-test('credentialed API base URL is rejected without exposing its secret', () => {
-  const suppliedApiBaseUrl = 'http://admin:secret123@api.example.test/';
-  const view = fixture({ name: 'Reset Fan', devices: [], apiBaseUrl: suppliedApiBaseUrl });
-  view.launch();
-
-  assert.equal(view.registered.length, 0);
-  const logged = view.logs.error.flat().join(' ');
-  assert.equal(logged.includes('secret123'), false);
-  assert.equal(logged.includes(suppliedApiBaseUrl), false);
-});
-
-test('valid startup registers exactly one stable reset accessory', () => {
-  const first = fixture({ name: 'Reset Fan', devices: [], apiBaseUrl: 'http://one.example.test/' });
-  first.launch();
-  assert.equal(first.registered.length, 1);
-  assert.equal(first.registered[0].displayName, 'Reset Fan');
-  assert.ok(first.registered[0].services.has(first.api.hap.Service.Switch));
-
-  const second = fixture({ name: 'Reset Fan', devices: [], apiBaseUrl: 'https://two.example.test' });
-  second.launch();
-  assert.equal(second.registered[0].UUID, first.registered[0].UUID);
-});
-
-test('repeated discovery does not duplicate reset registration', () => {
-  const view = fixture();
-  view.launch();
-  view.platform.discoverDevices();
-  assert.equal(view.registered.length, 1);
-});
-
-test('restores the stable reset accessory and refreshes its configured name', () => {
-  const view = fixture({ name: 'Current Name', devices: [] });
-  const cached = new FakePlatformAccessory('Cached Name', view.api.hap.uuid.generate('fan-reset-trigger'));
-  cached.context.device = { exampleDisplayName: 'Old Name', keep: 'value' };
-  view.platform.configureAccessory(cached as never);
-  view.launch();
-
-  assert.equal(view.registered.length, 0);
-  assert.equal(cached.displayName, 'Current Name');
-  assert.deepEqual(cached.context.device, { exampleDisplayName: 'Current Name', keep: 'value' });
-  assert.deepEqual(view.updated, [cached]);
-});
-
-test('removes cached accessories not present in the rebased configuration', () => {
-  const view = fixture();
-  for (const [uuid, name] of [['uuid:ABCD', 'Bedroom'], ['uuid:EFGH', 'Kitchen'], ['uuid:IJKL', 'Backyard']] as const) {
-    view.platform.configureAccessory(new FakePlatformAccessory(name, uuid) as never);
-  }
-  view.launch();
-
-  assert.equal(view.registered.length, 1);
-  assert.deepEqual(view.unregistered.map((accessory) => accessory.UUID).sort(), ['uuid:ABCD', 'uuid:EFGH', 'uuid:IJKL']);
-});
-
-test('configured fan accessories remain registered alongside the reset trigger', async () => {
+test('configured reset stays on the fan accessory and creates no separate accessory', async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => new Response(JSON.stringify({ isOn: false, speed: 0, isRotating: false }), { status: 200 });
 
   try {
     const view = fixture({
       name: 'SimpleIrFan',
-      devices: [{
-        name: 'Living Room Fan',
-        manufacturer: 'Generic',
-        model: 'IR Fan',
-        serialNumber: 'FAN-001',
-        endpoints: {
-          getStatus: { uri: 'http://fan.example.test/state', method: 'GET' },
-        },
-      }],
+      devices: [fanConfig()],
     });
     view.launch();
     await Promise.resolve();
 
-    assert.equal(view.registered.length, 2);
+    assert.equal(view.registered.length, 1);
     const fan = view.registered.find((accessory) => accessory.displayName === 'Living Room Fan');
     assert.ok(fan);
     assert.equal(fan.category, view.api.hap.Categories.FAN);
     assert.ok(fan.services.has(view.api.hap.Service.Fanv2));
+    assert.ok(fan.services.has(view.api.hap.Service.Switch));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('fans without reset preserve fan registration and expose no reset service', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ isOn: false, speed: 0, isRotating: false }), { status: 200 });
+  try {
+    const view = fixture({ name: 'SimpleIrFan', devices: [fanConfig('Bedroom Fan', false)] });
+    view.launch();
+    await Promise.resolve();
+    assert.equal(view.registered.length, 1);
+    assert.ok(view.registered[0].services.has(view.api.hap.Service.Fanv2));
+    assert.equal(view.registered[0].services.has(view.api.hap.Service.Switch), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('cached superseded global reset accessory is removed during reconciliation', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ isOn: false, speed: 0, isRotating: false }), { status: 200 });
+  try {
+    const view = fixture({ name: 'SimpleIrFan', devices: [fanConfig()] });
+    const stale = new FakePlatformAccessory('Old Reset', view.api.hap.uuid.generate('fan-reset-trigger'));
+    view.platform.configureAccessory(stale as never);
+    view.launch();
+    await Promise.resolve();
+    assert.ok(view.unregistered.some((accessory) => accessory.UUID === stale.UUID));
+    assert.equal(view.registered.some((accessory) => accessory.UUID === stale.UUID), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('fan UUID remains stable and cached fan registration is restored and removable', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ isOn: false, speed: 0, isRotating: false }), { status: 200 });
+  try {
+    const first = fixture({ name: 'SimpleIrFan', devices: [fanConfig()] });
+    first.launch();
+    await Promise.resolve();
+    const uuid = first.api.hap.uuid.generate('FAN-001:Living Room Fan');
+    const firstFan = first.registered.find((accessory) => accessory.displayName === 'Living Room Fan');
+    assert.ok(firstFan);
+    assert.equal(firstFan.UUID, uuid);
+
+    const restored = fixture({ name: 'SimpleIrFan', devices: [fanConfig('Living Room Fan', false)] });
+    const cached = new FakePlatformAccessory('Cached Fan', uuid);
+    restored.platform.configureAccessory(cached as never);
+    restored.launch();
+    await Promise.resolve();
+    assert.equal(restored.registered.length, 0);
+    assert.equal(restored.unregistered.length, 0);
+
+    const removed = fixture({ name: 'SimpleIrFan', devices: [] });
+    removed.platform.configureAccessory(cached as never);
+    removed.launch();
+    assert.deepEqual(removed.unregistered.map((accessory) => accessory.UUID), [uuid]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('cached fan reset service is reconciled through platform lifecycle when reset is removed', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ isOn: false, speed: 0, isRotating: false }), { status: 200 });
+  try {
+    const view = fixture({ name: 'SimpleIrFan', devices: [fanConfig('Living Room Fan', false)] });
+    const uuid = view.api.hap.uuid.generate('FAN-001:Living Room Fan');
+    const cached = new FakePlatformAccessory('Living Room Fan', uuid);
+    cached.services.set(view.api.hap.Service.Switch, new FakeService(view.api.hap.Service.Switch, 'fan-reset'));
+    view.platform.configureAccessory(cached as never);
+    view.launch();
+    await Promise.resolve();
+
+    assert.equal(cached.services.has(view.api.hap.Service.Fanv2), true);
+    assert.equal(cached.services.has(view.api.hap.Service.Switch), false);
+    assert.equal(view.unregistered.length, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('cached fan gains one stable reset service through platform lifecycle when reset is added', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ isOn: false, speed: 0, isRotating: false }), { status: 200 });
+  try {
+    const view = fixture({ name: 'SimpleIrFan', devices: [fanConfig()] });
+    const uuid = view.api.hap.uuid.generate('FAN-001:Living Room Fan');
+    const cached = new FakePlatformAccessory('Living Room Fan', uuid);
+    view.platform.configureAccessory(cached as never);
+    view.launch();
+    await Promise.resolve();
+
+    assert.equal(cached.services.get(view.api.hap.Service.Switch)?.subtype, 'fan-reset');
+    assert.equal(cached.services.size, 3);
+    view.platform.discoverDevices();
+    assert.equal(cached.services.size, 3);
+    assert.equal(cached.services.get(view.api.hap.Service.Switch)?.subtype, 'fan-reset');
   } finally {
     globalThis.fetch = originalFetch;
   }

@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { createServer, type Server } from 'node:http';
 import { mock, test } from 'node:test';
 
 import { DeviceIntegrationApiFanResetGateway } from '../src/fan/infrastructures/DeviceIntegrationApiFanResetGateway.js';
@@ -7,173 +6,125 @@ import { DeviceIntegrationApiFanResetGateway } from '../src/fan/infrastructures/
 type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>;
 type GatewayOptions = { fetch?: FetchLike; timeoutMs?: number };
 
-function gateway(baseUrl: string | undefined, options: GatewayOptions = {}) {
-  return new DeviceIntegrationApiFanResetGateway(baseUrl, options);
+function gateway(uri: string, options: GatewayOptions = {}) {
+  return new DeviceIntegrationApiFanResetGateway(uri, options);
 }
 
-async function withServer(
-  handler: (request: import('node:http').IncomingMessage, response: import('node:http').ServerResponse) => void,
-  callback: (baseUrl: string) => Promise<void>,
-): Promise<void> {
-  const server: Server = createServer(handler);
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const address = server.address();
-  assert.ok(address && typeof address !== 'string');
-
-  try {
-    await callback(`http://127.0.0.1:${address.port}`);
-  } finally {
-    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
-  }
-}
-
-test('omitted API base URL defaults to the OpenAPI localhost origin', async () => {
+test('accepts a configured full reset URI and posts to it unchanged', async () => {
   let requestUrl: string | undefined;
-  const fetch: FetchLike = async (input) => {
+  let requestInit: RequestInit | undefined;
+  const fetch: FetchLike = async (input, init) => {
     requestUrl = String(input);
-    return new Response(null, { status: 202 });
+    requestInit = init;
+    return new Response('ignored response body', { status: 202 });
   };
 
-  await gateway(undefined, { fetch }).reset();
+  await gateway('https://api.example.test/api/v1/fan/reset', { fetch }).reset();
 
-  assert.equal(requestUrl, 'http://localhost:3000/api/v1/fan/reset');
+  assert.equal(requestUrl, 'https://api.example.test/api/v1/fan/reset');
+  assert.equal(requestInit?.method, 'POST');
+  assert.equal(requestInit?.body, undefined);
 });
 
-test('valid origins are accepted and one trailing slash is normalized', async () => {
-  const requests: string[] = [];
-  const fetch: FetchLike = async (input) => {
-    requests.push(String(input));
-    return new Response(null, { status: 202 });
-  };
-
-  await gateway('http://api.example.test/', { fetch }).reset();
-  await gateway('https://api.example.test', { fetch }).reset();
-
-  assert.deepEqual(requests, [
-    'http://api.example.test/api/v1/fan/reset',
-    'https://api.example.test/api/v1/fan/reset',
-  ]);
-});
-
-test('origins containing a path, query, fragment, or unsupported scheme are rejected', () => {
+test('rejects wrong path, non-http(s), query, fragment, and credentials', () => {
   for (const invalid of [
-    'http://api.example.test/v1',
-    'http://api.example.test/?debug=true',
-    'http://api.example.test/#fragment',
-    'ftp://api.example.test',
-    'api.example.test',
+    'https://api.example.test/api/v1/fan/start',
+    'https://api.example.test/',
+    'ftp://api.example.test/api/v1/fan/reset',
+    'api.example.test/api/v1/fan/reset',
+    'https://api.example.test/api/v1/fan/reset?debug=true',
+    'https://api.example.test/api/v1/fan/reset#fragment',
+    'https://admin:secret@api.example.test/api/v1/fan/reset',
   ]) {
-    assert.throws(() => gateway(invalid), invalid);
+    assert.throws(() => gateway(invalid));
   }
 });
 
-test('origins with embedded credentials are rejected', () => {
-  for (const invalid of [
-    'http://admin:secret@api.example.test',
-    'http://admin@api.example.test',
-    'http://:secret@api.example.test',
-  ]) {
-    assert.throws(
-      () => gateway(invalid),
-      /embedded credentials are not allowed/,
-    );
-  }
-});
-
-test('reset uses exactly one bodyless POST to the normalized endpoint', async () => {
-  await withServer((request, response) => {
-    let body = '';
-    request.setEncoding('utf8');
-    request.on('data', (chunk: string) => {
-      body += chunk;
-    });
-    request.on('end', () => {
-      assert.equal(request.method, 'POST');
-      assert.equal(request.url, '/api/v1/fan/reset');
-      assert.equal(body, '');
-      response.writeHead(202).end();
-    });
-  }, async (baseUrl) => {
-    await gateway(`${baseUrl}/`, { timeoutMs: 100 }).reset();
-  });
+test('credential validation errors do not disclose the credential or endpoint URI', () => {
+  assert.throws(
+    () => gateway('https://admin:super-secret@api.example.test/api/v1/fan/reset'),
+    (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.equal(error.message.includes('super-secret'), false);
+      assert.equal(error.message.includes('api.example.test'), false);
+      return true;
+    },
+  );
 });
 
 test('only HTTP 202 is accepted as success', async () => {
   for (const status of [200, 201, 204, 400, 500]) {
     const fetch: FetchLike = async () => new Response(null, { status });
-    await assert.rejects(gateway('http://api.example.test', { fetch }).reset());
+    await assert.rejects(
+      gateway('http://api.example.test/api/v1/fan/reset', { fetch }).reset(),
+      /unexpected status/,
+    );
   }
 
   const fetch: FetchLike = async () => new Response(null, { status: 202 });
-  await gateway('http://api.example.test', { fetch }).reset();
+  await gateway('http://api.example.test/api/v1/fan/reset', { fetch }).reset();
 });
 
-test('a request that exceeds the timeout is failed and aborted', async () => {
+test('injected timeout aborts the request and does not retry', async () => {
+  let calls = 0;
   let aborted = false;
   const fetch: FetchLike = async (_input, init) => {
+    calls += 1;
     init?.signal?.addEventListener('abort', () => {
       aborted = true;
     });
     return new Promise<Response>(() => undefined);
   };
 
-  await assert.rejects(gateway('http://api.example.test', { fetch, timeoutMs: 20 }).reset());
-  assert.equal(aborted, true);
-});
-
-test('omitted timeout uses exactly 5 seconds and aborts without real delay', async () => {
-  let aborted = false;
-  let fetchCalls = 0;
-  const fetch: FetchLike = async (_input, init) => {
-    init?.signal?.addEventListener('abort', () => {
-      aborted = true;
-    });
-    fetchCalls += 1;
-    return new Promise<Response>(() => undefined);
-  };
-
-  let settled = false;
   mock.timers.enable();
-  const resetResult = gateway('http://api.example.test', { fetch }).reset().finally(() => {
-    settled = true;
-  });
-
   try {
-    mock.timers.tick(4999);
-    await Promise.resolve();
-    assert.equal(fetchCalls, 1);
-    assert.equal(aborted, false);
-    assert.equal(settled, false);
-
-    mock.timers.tick(1);
-    await assert.rejects(resetResult);
+    const result = gateway('http://api.example.test/api/v1/fan/reset', { fetch, timeoutMs: 20 }).reset();
+    mock.timers.tick(20);
+    await assert.rejects(result, /timed out/);
     assert.equal(aborted, true);
-    assert.equal(fetchCalls, 1);
+    assert.equal(calls, 1);
   } finally {
     mock.timers.reset();
   }
 });
 
-test('network and HTTP failures are contained and never retried', async () => {
-  let networkCalls = 0;
-  const networkFailureFetch: FetchLike = async () => {
-    networkCalls += 1;
-    throw new TypeError('simulated loopback network failure');
+test('default timeout is five seconds and aborts without a real delay', async () => {
+  let aborted = false;
+  const fetch: FetchLike = async (_input, init) => {
+    init?.signal?.addEventListener('abort', () => {
+      aborted = true;
+    });
+    return new Promise<Response>(() => undefined);
   };
-  await assert.rejects(
-    gateway('http://api.example.test', { fetch: networkFailureFetch }).reset(),
-    /network failure/,
-  );
-  assert.equal(networkCalls, 1);
 
-  let statusCalls = 0;
-  const failureStatusFetch: FetchLike = async () => {
-    statusCalls += 1;
-    return new Response(null, { status: 500 });
+  mock.timers.enable();
+  try {
+    const result = gateway('http://api.example.test/api/v1/fan/reset', { fetch }).reset();
+    mock.timers.tick(4999);
+    await Promise.resolve();
+    assert.equal(aborted, false);
+    mock.timers.tick(1);
+    await assert.rejects(result, /timed out/);
+    assert.equal(aborted, true);
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test('network failures are contained, secret-safe, and never retried', async () => {
+  let calls = 0;
+  const fetch: FetchLike = async () => {
+    calls += 1;
+    throw new Error('upstream failed with token=super-secret');
   };
+
   await assert.rejects(
-    gateway('http://api.example.test', { fetch: failureStatusFetch }).reset(),
-    /unexpected status/,
+    gateway('http://api.example.test/api/v1/fan/reset', { fetch }).reset(),
+    (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.equal(error.message.includes('super-secret'), false);
+      return true;
+    },
   );
-  assert.equal(statusCalls, 1);
+  assert.equal(calls, 1);
 });

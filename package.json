@@ -56,34 +56,29 @@
       "singular": true,
       "schema": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
           "name": {
             "type": "string",
             "title": "Platform Name",
             "default": "SimpleIrFan"
           },
-          "apiBaseUrl": {
-            "type": "string",
-            "title": "Device Integration API base URL",
-            "default": "http://localhost:3000",
-            "description": "Absolute HTTP/HTTPS origin for POST /api/v1/fan/reset. Paths, queries, fragments, and embedded credentials are not allowed.",
-            "format": "uri",
-            "pattern": "^https?:\\/\\/(?![^/\\s?#]*@)[^/\\s?#]+(?::\\d+)?\\/?$"
-          },
           "devices": {
             "type": "array",
             "title": "Fans",
             "items": {
               "type": "object",
+              "additionalProperties": false,
               "required": ["name", "manufacturer", "model", "serialNumber", "endpoints"],
               "properties": {
                 "name": { "type": "string" },
                 "manufacturer": { "type": "string", "default": "Generic" },
                 "model": { "type": "string", "default": "Fan" },
                 "serialNumber": { "type": "string" },
-                "timeoutMs": { "type": "number", "default": 5000 },
+                "timeoutMs": { "type": "integer", "minimum": 1, "default": 5000 },
                 "endpoints": {
                   "type": "object",
+                  "additionalProperties": false,
                   "required": ["getStatus"],
                   "properties": {
                     "start": { "$ref": "#/definitions/endpoint" },
@@ -91,7 +86,24 @@
                     "setSpeed": { "$ref": "#/definitions/endpoint" },
                     "startRotation": { "$ref": "#/definitions/endpoint" },
                     "stopRotation": { "$ref": "#/definitions/endpoint" },
-                    "getStatus": { "$ref": "#/definitions/endpoint" }
+                    "getStatus": { "$ref": "#/definitions/endpoint" },
+                    "reset": {
+                      "type": "object",
+                      "title": "Reset",
+                      "required": ["uri", "method"],
+                      "additionalProperties": false,
+                      "properties": {
+                        "uri": {
+                          "type": "string",
+                          "format": "uri",
+                          "pattern": "^https?:\\/\\/(?![^/\\s?#]*@)(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*|\\d{1,3}(?:\\.\\d{1,3}){3}|\\[[A-Fa-f0-9:.]+\\])(?::\\d+)?\\/api\\/v1\\/fan\\/reset$"
+                        },
+                        "method": {
+                          "type": "string",
+                          "const": "POST"
+                        }
+                      }
+                    }
                   }
                 },
                 "auth": {
