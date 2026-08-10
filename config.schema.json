@@ -19,6 +19,14 @@
         "type": "string",
         "default": "SimpleIrFan"
       },
+      "apiBaseUrl": {
+        "title": "Device Integration API base URL",
+        "type": "string",
+        "default": "http://localhost:3000",
+        "description": "Absolute HTTP/HTTPS origin used for the bodyless POST /api/v1/fan/reset action. Paths, queries, fragments, and embedded credentials are not allowed.",
+        "format": "uri",
+        "pattern": "^https?:\\/\\/(?![^/\\s?#]*@)[^/\\s?#]+(?::\\d+)?\\/?$"
+      },
       "devices": {
         "title": "Devices",
         "type": "array",

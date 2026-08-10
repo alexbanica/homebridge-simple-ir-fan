@@ -31,6 +31,7 @@
     "build": "rimraf ./dist && tsc",
     "prepare": "npm run build",
     "lint": "eslint . --max-warnings=0",
+    "test": "rimraf ./.test-dist && tsc -p tsconfig.test.json && node --test .test-dist/test/*.test.js",
     "prepublishOnly": "npm run lint && npm run build",
     "watch": "npm run build && npm link && nodemon"
   },
@@ -60,6 +61,14 @@
             "type": "string",
             "title": "Platform Name",
             "default": "SimpleIrFan"
+          },
+          "apiBaseUrl": {
+            "type": "string",
+            "title": "Device Integration API base URL",
+            "default": "http://localhost:3000",
+            "description": "Absolute HTTP/HTTPS origin for POST /api/v1/fan/reset. Paths, queries, fragments, and embedded credentials are not allowed.",
+            "format": "uri",
+            "pattern": "^https?:\\/\\/(?![^/\\s?#]*@)[^/\\s?#]+(?::\\d+)?\\/?$"
           },
           "devices": {
             "type": "array",

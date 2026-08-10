@@ -1,6 +1,7 @@
 {
   "platform": "SimpleIrFan",
   "name": "SimpleIrFan",
+  "apiBaseUrl": "http://localhost:3000",
   "devices": [
     {
       "name": "Alex's ManCave Fan",
