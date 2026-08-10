@@ -1,144 +1,110 @@
-<p align="center">
-  <img src="https://github.com/homebridge/branding/raw/latest/logos/homebridge-wordmark-logo-vertical.png" width="150" alt="Homebridge">
-</p>
+# homebridge-simple-ir-fan
 
-<h1 align="center">homebridge-simple-ir-fan</h1>
-
-A Homebridge dynamic platform plugin (TypeScript) to expose an IR-controlled ceiling/stand fan to Apple Home. It bridges basic fan functions via HomeKit, mapping IR commands (power, speed, swing, etc.) through configurable commands.
-
-Note: This template targets Homebridge v1 and v2.
+A Homebridge dynamic platform plugin that exposes configurable HTTP-controlled fans and per-fan Device Integration API reset triggers.
 
 ## Features
-- Dynamic platform with discover/register flow
-- TypeScript build with strict ESLint
-- Hot-reload dev workflow (watch + auto Homebridge restart)
-- Homebridge UI config schema for guided setup
+
+- One HomeKit `Fanv2` accessory for each configured fan device.
+- Power, speed, and oscillation controls backed by configurable HTTP endpoints.
+- Status refresh from each device's configured `getStatus` endpoint.
+- One stable HomeKit `Switch` service per fan (where configured) for resetting Device Integration API application state.
+- Cached accessory restoration and removal of devices no longer present in configuration.
 
 ## Requirements
-- Node.js 18+
-- Homebridge installed globally
-- An IR blaster supported by your setup (e.g., via command hooks or external scripts)
+
+- A Homebridge-supported Node.js version.
+- Homebridge 1.8 or later, or a supported Homebridge 2 beta.
+- Network reachability from Homebridge to the configured fan endpoints and Device Integration API.
 
 ## Installation
-In the project directory:
-- npm install
 
-Global link for local testing:
-- npm link
+Install dependencies and build the plugin:
+
+```shell
+npm install
+npm run build
+```
+
+For local Homebridge development, link the package with `npm link` and use `npm run watch`.
 
 ## Configuration
-Configure the plugin in Homebridge UI or via JSON. See:
-- config.schema.json (UI-driven fields)
-- config.example.json (text example)
 
-Typical minimal JSON (adapt to your IR stack):
+The public identifiers are:
+
+- Plugin: `homebridge-simple-ir-fan`
+- Platform: `SimpleIrFan`
+
+See [`config.schema.json`](./config.schema.json) for the Homebridge UI contract and [`config.example.json`](./config.example.json) for a complete example.
+
+```json
 {
-"platforms": [
-{
-"platform": "SimpleIRFanPlatform",
-"name": "Simple IR Fan",
-"devices": [
-{
-"name": "Living Room Fan",
-"commands": {
-"powerOn": "your-ir-command-here",
-"powerOff": "your-ir-command-here",
-"speedLow": "your-ir-command-here",
-"speedMedium": "your-ir-command-here",
-"speedHigh": "your-ir-command-here",
-"swingToggle": "your-ir-command-here"
+  "platform": "SimpleIrFan",
+  "name": "SimpleIrFan",
+  "devices": [
+    {
+      "name": "Living Room Fan",
+      "manufacturer": "Generic",
+      "model": "IR Fan",
+      "serialNumber": "FAN-001",
+      "timeoutMs": 5000,
+      "endpoints": {
+        "start": { "uri": "http://fan-api/api/ventilator/start", "method": "POST" },
+        "stop": { "uri": "http://fan-api/api/ventilator/stop", "method": "POST" },
+        "setSpeed": { "uri": "http://fan-api/api/ventilator/speed/${speed}", "method": "PUT" },
+        "startRotation": { "uri": "http://fan-api/api/ventilator/rotate", "method": "POST" },
+        "stopRotation": { "uri": "http://fan-api/api/ventilator/rotate", "method": "POST" },
+        "reset": { "uri": "http://fan-api/api/v1/fan/reset", "method": "POST" },
+        "getStatus": { "uri": "http://fan-api/api/ventilator/state", "method": "GET" }
+      }
+    }
+  ]
 }
-}
-]
-}
-]
-}
+```
 
-Ensure the platform value matches the schema/platform settings in your codebase.
+Each device supports optional authentication headers or a bearer token through its `auth` configuration. Fan endpoint behavior remains independent of the reset trigger.
 
-## Scripts
-- Build:
-    - npm run build
-- Watch (auto build + auto restart Homebridge using nodemon):
-    - npm run watch
-- Lint:
-    - npm run lint
-- Clean:
-    - npm run clean
+### Reset configuration migration
 
-## Local Development
-1) Link the plugin:
-- npm link
+`apiBaseUrl` is no longer used.
 
-2) Add your platform to a Homebridge config (example test/hbConfig or your local Homebridge config):
-   {
-   "platforms": [
-   { "name": "Config", "port": 8581, "platform": "config" },
-   {
-   "name": "Simple IR Fan",
-   "platform": "SimpleIRFanPlatform"
-   }
-   ]
-   }
+- Remove top-level `apiBaseUrl` from your config.
+- Add optional `reset` under each fan’s `endpoints` object as `devices[].endpoints.reset`.
+- The new per-fan `reset` configuration replaces the previous platform-level reset accessory behavior.
 
-3) Start watch mode:
-- npm run watch
+## Reset switch behavior
 
-4) Run Homebridge in debug (separate terminal if not using watch-integrated start):
-- homebridge -D
+The platform exposes one stable momentary `Switch` service on the fan’s own accessory:
 
-Notes:
-- Ensure no other Homebridge instance is running
-- You can tweak nodemon.json to adjust startup behavior
+- An ON write sends exactly one bodyless `POST` to the configured `endpoints.reset.uri`.
+- Only HTTP `202 Accepted` is considered successful.
+- The request times out after the fan’s configured `timeoutMs`, defaulting to `5000`.
+- No automatic retries are performed.
+- OFF writes do not contact the API.
+- The switch reports `ON` while the request is pending and returns to `OFF` after success or failure.
+- Failures are logged and surfaced to HomeKit as `SERVICE_COMMUNICATION_FAILURE` without escaping the plugin boundary.
+- Concurrent ON writes on the same fan reuse one in-flight request.
+- ON writes on different fans are independent.
 
-## Development Layout
-- src/: platform, accessory, settings, and helpers
-- config.schema.json: UI config for Homebridge Config UI X
-- config.example.json: example JSON for manual config
-- dist/: compiled output
+The reset endpoint must match the full URI with method `POST` and path `/api/v1/fan/reset`.
+It must use `http://` or `https://`, and it must not include a query string, fragment, or embedded credentials.
 
-## Versioning
-Follow SemVer.
-- MAJOR: breaking changes
-- MINOR: features
-- PATCH: fixes
+Fan-level authentication configured on `devices[].auth` is not applied to reset requests. Reset calls are unauthenticated.
 
-Bump versions:
-- npm version major
-- npm version minor
-- npm version patch
+If configured, the reset endpoint applies only to API application state (`isOn=false`, `speed=0`, `isRotating=false`) and does not issue any IR command or read physical fan state.
 
-## Publish
-Before publishing:
-- Ensure package.json metadata is set (name, displayName, repository, bugs, homepage)
-- Remove "private" or set to false
-- npm publish
+When valid reset configuration is removed, no reset switch is exposed for that fan.
 
-For first-time scoped packages:
-- npm publish --access=public
+## Validation
 
-### Beta releases
-- npm version prepatch --preid beta
-- npm publish --tag beta
+```shell
+npm test
+npm run lint
+npm run build
+npm run prepublishOnly
+```
 
-Install beta globally:
-- sudo npm install -g your-scope/your-package@beta
-
-## Best Practices
-- Do not start devices until configured
-- Support current LTS Node.js
-- No post-install scripts modifying the system
-- Implement Homebridge UI schema
-- Store files only in Homebridge storage dir
-- Log and handle errors; avoid unhandled exceptions
-- No analytics/tracking
+Runtime validation requires starting Homebridge with the intended configuration, activating the reset Switch in Home, and confirming it returns to OFF after the API request settles.
 
 ## License
-Apache License 2.0
 
-## Author
-Ionut-Alexandru Banica
-
-## Support
-- Homebridge Docs: https://developers.homebridge.io/
-- Verified plugin guidance: https://github.com/homebridge/verified#requirements
+Apache-2.0

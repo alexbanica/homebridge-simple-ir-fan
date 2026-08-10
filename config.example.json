@@ -30,6 +30,10 @@
           "uri": "http://pi11.pi.home/api/ventilator/rotate",
           "method": "POST"
         },
+        "reset": {
+          "uri": "http://pi11.pi.home/api/v1/fan/reset",
+          "method": "POST"
+        },
         "getStatus": {
           "uri": "http://pi11.pi.home/api/ventilator/state",
           "method": "GET"
