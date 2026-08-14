@@ -1,380 +1,374 @@
-# PLAN-001 - Homebridge Fan Reset Trigger
+# PLAN-001 - Homebridge Fan Reset And Rotation Triggers
 
 Status: Approved
 Date: 2026-08-10
+Updated: 2026-08-14
 
 ## Approved Spec
 
 - `specs/SPEC-001-homebridge-fan-reset-trigger.md`
-- Updated spec status verified as `Approved` before this plan revision.
+- Status verified as `Approved` after the reset-style rotation iteration.
 
 ## Objective
 
-Move reset from the superseded platform-level accessory into an optional
-per-configured-fan endpoint and momentary Switch service on that fan's existing
-HomeKit accessory. Preserve all current Fanv2 behavior, reconcile cached reset
-services and the old global reset accessory, validate deterministically, and
-deliver every accepted in-scope artifact in a pushed follow-up commit.
+Preserve the delivered optional per-fan Reset Switch and add an independently
+configured momentary Rotation Toggle Switch to the same fan accessory. Replace
+stateful SwingMode and `startRotation`/`stopRotation` configuration with one
+strict `endpoints.rotate` action, validate the complete final behavior, and
+commit and push every accepted in-scope change.
 
 ## Implementation Context Boundary
 
-- Implementation must begin in a fresh session, after context is cleared, or
-  after the user explicitly confirms same-context implementation.
-- Load only applicable instructions, this approved spec and approved plan,
-  current branch/worktree state, files listed in this plan, and minimal local
-  edit patterns.
-- Product research, architecture research, broad scope discovery, plan
-  discovery, and changes to the Device Integration API are prohibited during
+- Implementation starts only in a fresh session, after context is cleared, or
+  after explicit same-context confirmation for that invocation.
+- Load only applicable instructions, the approved spec and plan, branch and
+  worktree state, files listed here, and minimal local edit patterns.
+- Do not perform product, architecture, scope, or plan research during
   implementation.
-- The OpenAPI reset operation and approved API `SPEC-007` remain read-only
-  contract inputs. Stop for an artifact amendment if method, path, body,
-  authentication, or response behavior differs.
-- Existing Fanv2 power, speed, oscillation, status, authentication, device UUID,
-  and cache behavior on `origin/latest` are the regression baseline.
-- Missing, ambiguous, incorrect, or materially different behavior discovered
-  during implementation requires an approved spec or plan amendment.
+- Treat current Device Integration API OpenAPI and controller behavior as
+  read-only contract input for bodyless `POST /api/v1/fan/rotate` and exact
+  `202` success.
+- Do not edit `/home/alexbanica/workspace/device-integration-api`.
+- Preserve the currently delivered reset behavior. A material contract mismatch
+  or missing/ambiguous behavior requires an approved artifact amendment.
 
 ## Branch And Worktree Policy
 
-- Continue on existing branch `feature/homebridge-fan-reset-trigger`, currently
-  rebased onto `origin/latest` and tracking
+- Delivery branch: `feature/homebridge-fan-reset-trigger`.
+- Expected base state: existing commit `e70cf86`, with `origin/latest` remaining
+  an ancestor and the branch tracking
   `origin/feature/homebridge-fan-reset-trigger`.
-- At implementation start, fetch `origin`; verify `origin/latest` remains an
-  ancestor of the feature branch and classify every worktree change.
-- The approved spec and proposed/approved plan edits are expected in-scope
-  worktree changes and must be preserved for the implementation commit.
-- Do not create a replacement branch, amend the previously pushed reset commit,
-  rebase again, or force-push unless the user explicitly requests it.
-- If the branch has diverged or contains unexplained changes beyond the approved
-  artifacts, stop before changing branch state.
+- Implementation remains in the invoking checkout; no linked worktree is used.
+- Reuse the existing delivery branch and verify it before edits. Do not create a
+  replacement branch, amend the pushed reset commit, rebase, or force-push.
+- At implementation start, fetch `origin`, verify ancestry and upstream state,
+  and classify every worktree change. The approved spec and proposed/approved
+  plan edits are expected in-scope changes.
+- Stop if branch identity, ancestry, upstream state, or unexplained worktree
+  changes conflict with this plan.
 - Subagents must not create or switch branches, commit, push, or revert unrelated
-  edits. They are not alone in the worktree and must accommodate completed units.
+  edits. They are not alone in the checkout and must preserve other units' work.
 
 ## Final Intended Architecture And Affected Files
 
 ### Approved artifacts
 
-- `specs/SPEC-001-homebridge-fan-reset-trigger.md`: approved final behavior.
-- `plans/PLAN-001-homebridge-fan-reset-trigger.md`: approved final execution
-  contract.
+- `specs/SPEC-001-homebridge-fan-reset-trigger.md`: approved final reset and
+  rotation behavior.
+- `plans/PLAN-001-homebridge-fan-reset-trigger.md`: approved execution contract.
 
 ### Per-fan configuration contract
 
-- `src/dtos/FanResetEndpointInterface.ts`: add the inward configuration shape
-  for reset with `uri` and literal `method: 'POST'`; it accepts no headers,
-  query, authentication, or body configuration.
-- `src/dtos/FanEndpoints.ts`: add optional
-  `reset?: FanResetEndpointInterface` without changing existing endpoint fields.
-- `config.schema.json`: remove top-level `apiBaseUrl`; add optional per-device
-  `endpoints.reset` with an absolute HTTP(S) URI, exact reset path, no
-  query/fragment/credentials, `POST` const, and no extra fields.
-- `package.json`: make the same change in the package-embedded Homebridge schema;
-  preserve package identity, dependencies, and scripts.
-- `config.example.json`: remove top-level `apiBaseUrl` and show an optional reset
-  descriptor inside the configured fan's `endpoints`.
+- Add `src/dtos/FanRotationEndpointInterface.ts` with only `uri` and literal
+  `method: 'POST'`.
+- Update `src/dtos/FanEndpoints.ts` to remove `startRotation` and
+  `stopRotation`, retain `reset`, and add optional
+  `rotate?: FanRotationEndpointInterface`.
+- Update `config.schema.json` and the package-embedded schema in `package.json`
+  identically:
+  - remove `startRotation` and `stopRotation`;
+  - add optional strict `rotate` with an absolute HTTP(S) URI whose exact path is
+    `/api/v1/fan/rotate`;
+  - reject query, fragment, credentials, malformed port, extra fields, and any
+    method other than `POST`;
+  - preserve reset and all unrelated schema behavior.
+- Update `config.example.json` to replace the two legacy rotation descriptors
+  with one `rotate` descriptor.
 
-### Application and HTTP infrastructure
+### Rotation application and HTTP infrastructure
 
-- `src/fan/services/FanResetGatewayInterface.ts`: expected unchanged.
-- `src/fan/services/FanResetServiceInterface.ts`: expected unchanged.
-- `src/fan/services/FanResetService.ts`: expected unchanged; retain per-instance
-  one-in-flight coalescing and failure recovery.
-- `src/fan/infrastructures/DeviceIntegrationApiFanResetGateway.ts`: accept the
-  configured full reset URI rather than a global API origin; validate HTTP(S),
-  exact `/api/v1/fan/reset` path, no query/fragment/credentials, and retain the
-  bodyless POST, exact `202`, injected/per-fan timeout, no retry, and contained
-  error behavior.
+- Add `src/fan/services/FanRotationGatewayInterface.ts` with one
+  `rotate(): Promise<void>` operation.
+- Add `src/fan/services/FanRotationServiceInterface.ts` with the same inward
+  application operation.
+- Add `src/fan/services/FanRotationService.ts` to coalesce one in-flight rotation
+  request per configured fan and clear it after success or failure.
+- Add `src/fan/infrastructures/DeviceIntegrationApiFanRotationGateway.ts`:
+  - accept the configured full rotation URI;
+  - validate HTTP(S), exact `/api/v1/fan/rotate`, no query, fragment, or
+    credentials;
+  - send a bodyless unauthenticated `POST`;
+  - use injected/default fetch and configured timeout;
+  - treat only `202` as success;
+  - perform no retry and emit secret-safe contained errors;
+  - depend only on the inward rotation gateway contract.
+- Keep existing reset gateway and service contracts behaviorally unchanged.
+  Small type-only reuse is permitted only if it cannot alter reset behavior or
+  blur action-specific errors.
 
-### Homebridge adapters and lifecycle
+### Homebridge adapter and lifecycle
 
-- `src/platformAccessory.ts`:
-  - preserve `SimpleIrFanAccessory` and all Fanv2 handlers;
-  - remove the standalone `FanResetPlatformAccessory` adapter;
-  - when `device.endpoints.reset` is valid, compose a reset gateway/service for
-    that fan using `device.timeoutMs ?? 5000`;
-  - add one stable-subtype momentary Switch service to the same
-    `PlatformAccessory` as Fanv2;
-  - when reset is absent or invalid, remove any cached per-fan reset Switch while
-    preserving Fanv2;
-  - contain device-specific reset configuration and request failures, identify
-    the fan in concise logs, and never log the raw endpoint or credentials;
-  - keep reset writes independent of Fanv2 characteristic state.
-- `src/platform.ts`:
-  - remove top-level `apiBaseUrl`, global gateway/service composition, global
-    reset discovery, and standalone reset registration;
-  - discover only configured fan UUIDs so the superseded cached global reset
-    accessory is unregistered by normal reconciliation;
-  - preserve current configured-fan registration/restoration/removal behavior.
-- `src/index.ts` and `src/settings.ts`: expected unchanged; public identifiers
-  remain `homebridge-simple-ir-fan` and `SimpleIrFan`.
+- Update `src/platformAccessory.ts`:
+  - preserve Fanv2 Active and RotationSpeed handlers;
+  - remove SwingMode get/set binding and the old `FanService.toggleRotate()`
+    flow;
+  - remove a superseded SwingMode characteristic where the Homebridge API
+    supports characteristic reconciliation and never bind it again;
+  - compose the optional rotation gateway/service from `device.endpoints.rotate`
+    using `device.timeoutMs ?? 5000`;
+  - add one stable-subtype `fan-rotation-toggle` Switch named for the configured
+    fan on the existing accessory;
+  - reconcile the cached Rotation Toggle Switch when config is added, removed,
+    or invalid without affecting Fanv2 or Reset;
+  - keep the Switch OFF while idle, ON while pending, and OFF after every
+    outcome;
+  - make OFF a no-op, coalesce concurrent same-fan rotation writes, keep reset
+    and rotation independent, and allow later retries;
+  - log one concise result per shared action without endpoint secrets;
+  - map failures to `SERVICE_COMMUNICATION_FAILURE` and contain all async errors;
+  - make no `isRotating` or final physical-state claim.
+- Update `src/services/FanService.ts` to remove the superseded
+  `toggleRotate()` method while preserving refresh, power, speed, and status
+  behavior. Retain `isRotating` response ingestion only if still needed by an
+  existing non-SwingMode contract; otherwise remove only dead rotation-specific
+  state access proven unused by tests and TypeScript.
+- `src/platform.ts` is expected unchanged. It must continue registering only
+  configured fan UUIDs and no separate action accessories.
+- `src/index.ts` and `src/settings.ts` remain unchanged.
 
 ### Deterministic tests
 
-- `test/deviceIntegrationApiFanResetGateway.test.ts`: replace global-base/default
-  assumptions with full configured URI validation, exact path/body/method/status,
-  timeout, no-retry, and secret-safe error tests.
-- `test/fanResetService.test.ts`: retain current coalescing and recovery tests;
-  add independent-service-instance coverage only if needed to prove per-fan
-  isolation without coupling to Homebridge.
-- `test/platformAccessory.test.ts`: test optional per-fan reset Switch creation
-  on the same accessory, absence/removal, stable subtype, state transitions,
-  same-fan coalescing, different-fan independence, timeout propagation, logging,
-  HAP failure mapping, retry, and unchanged Fanv2 service presence.
-- `test/platform.test.ts`: test no standalone reset registration, cleanup of the
-  old global reset UUID, stable fan UUIDs, normal fan registration/restoration,
-  and preservation of configured fan accessories.
-- `test/configSchema.test.ts`: parse both schema locations and example config;
-  prove top-level `apiBaseUrl` is absent and optional per-device reset schema is
-  aligned, POST-only, and restrictive.
-- `tsconfig.test.json`, `.gitignore`, `eslint.config.js`, and the `npm test`
-  harness are expected unchanged.
+- Add `test/deviceIntegrationApiFanRotationGateway.test.ts` for URI validation,
+  exact HTTP contract, timeout, no retry, only-202 success, and secret-safe
+  errors.
+- Add `test/fanRotationService.test.ts` for idle activation, identical in-flight
+  promise reuse, later activation, failure sharing, and recovery.
+- Update `test/platformAccessory.test.ts` for optional same-accessory Rotation
+  Toggle composition, stable subtype, cached add/remove, pending/OFF states,
+  same-fan coalescing, cross-fan and reset independence, timeout, logging, HAP
+  failures, retry, no final-state claim, and unchanged Fanv2/reset behavior.
+- Update `test/platform.test.ts` only for lifecycle assertions proving no
+  separate rotation accessory, stable fan UUIDs, and cached Rotation Toggle
+  reconciliation through the platform path.
+- Update `test/configSchema.test.ts` for schema parity, strict `rotate`, removal
+  of `startRotation`/`stopRotation`, and example agreement.
+- Keep existing reset tests passing without weakening their assertions.
 
 ### Documentation
 
-- `README.md`: document optional per-fan reset configuration, same-accessory
-  Switch semantics, migration from top-level `apiBaseUrl`, exact HTTP contract,
-  timeout/no-retry/failure behavior, and the application-state-only limitation.
-- `AGENTS.md`: expected unchanged; current architecture guidance remains valid.
+- Update `README.md` with exact `endpoints.rotate` placement, request contract,
+  momentary behavior, failure behavior, state limitation, and migration from
+  `startRotation`/`stopRotation` and SwingMode.
+- Keep reset migration and behavior documentation accurate.
+- Do not update `AGENTS.md` unless an approved architecture boundary becomes
+  factually stale.
 
 ## Test Strategy
 
-- Test-first applies to configured-URI validation, per-fan service composition,
-  HomeKit state/reconciliation, and schema migration.
-- Use Node's built-in test runner and the existing TypeScript harness; add no
-  dependencies or test framework.
-- Each test unit must record an intentional failing state before its dependent
-  production unit begins. Missing behavior or old global behavior is acceptable
-  red evidence.
-- Tests use fakes, injected fetch functions, or loopback HTTP only. They must not
-  contact a live Device Integration API, fan endpoint, Homebridge instance, or
-  HomeKit home.
-- Preserve existing fan behavior tests and do not rewrite them merely to fit a
-  regression.
+- Test-first applies to the rotation gateway, application coalescing, accessory
+  behavior, lifecycle reconciliation, and configuration migration.
+- Use the existing Node test runner and TypeScript harness; add no dependency or
+  test framework.
+- Each test unit records an intentional failing state before dependent
+  production work begins.
+- Tests use fakes, injected fetch, or loopback HTTP only and never contact a live
+  API, Homebridge, Home, or HomeKit runtime.
+- Preserve existing reset assertions and fan regression tests.
 
 ## Dependency-Aware Work Graph
 
-Maximum planned concurrency is three test-writers, two developers, and three
-code reviewers. Every assignment is sized for no more than five minutes of
-active work.
+Maximum planned concurrency: three test-writers, two developers, and three code
+reviewers. Every assignment is limited to five minutes of active work. The main
+agent serializes integration of shared files.
 
-### T1 - Configured reset URI gateway tests
-
-- Type: test-first.
-- Agent: one clean-context `test-writer`.
-- Owned file: `test/deviceIntegrationApiFanResetGateway.test.ts`.
-- Boundary: full reset URI validation and HTTP contract only.
-- Dependencies: approved spec and plan.
-- Acceptance: intentional red tests cover valid configured URI, wrong path,
-  non-HTTP(S), query, fragment, credentials, exact bodyless POST, only `202`,
-  per-fan/default timeout, abort, no retry, and contained errors.
-- Validation: focused TypeScript compile and focused Node test; record red result.
-
-### T2 - Same-accessory reset service tests
+### T1 - Rotation gateway and application tests
 
 - Type: test-first.
 - Agent: one clean-context `test-writer`.
-- Owned file: `test/platformAccessory.test.ts`.
-- Boundary: configured fan accessory and reset Switch behavior.
+- Owned files: new `test/deviceIntegrationApiFanRotationGateway.test.ts` and
+  `test/fanRotationService.test.ts`.
 - Dependencies: approved spec and plan.
-- Acceptance: intentional red tests cover no reset option, valid reset on the
-  same accessory, stable subtype, cached service removal, momentary states,
-  OFF no-op, same-fan coalescing, per-fan isolation, failures, retry, logging,
-  HAP mapping, timeout selection, and unchanged Fanv2 presence.
-- Validation: focused compile/test; record red result.
+- Acceptance: intentional red tests cover strict URI/method/body/status,
+  timeout/no retry, secret safety, per-service coalescing, settlement clearing,
+  shared failure, and recovery.
+- Validation: focused TypeScript compile and focused Node tests; record red
+  evidence.
 
-### T3 - Platform lifecycle tests
+### T2 - Rotation accessory and lifecycle tests
 
 - Type: test-first.
 - Agent: one clean-context `test-writer`.
-- Owned file: `test/platform.test.ts`.
-- Boundary: configured fan UUIDs and global reset accessory removal.
+- Owned files: `test/platformAccessory.test.ts` and `test/platform.test.ts`.
 - Dependencies: approved spec and plan.
-- Acceptance: intentional red tests prove no separate reset registration, the
-  superseded global reset UUID is removed, fan UUIDs remain stable, and fan
-  registration/restoration/removal behavior is preserved.
-- Validation: focused compile/test; record red result.
+- Acceptance: intentional red tests cover optional same-accessory Switch,
+  stable subtype, no separate accessory, cached add/remove, SwingMode removal,
+  pending/OFF transitions, same-fan coalescing, different-fan/reset
+  independence, failures, retry, timeout, logging, HAP mapping, UUID stability,
+  and preserved Fanv2/reset behavior.
+- Validation: focused compile/tests; record red evidence.
 
-### T4 - Configuration contract tests
+### T3 - Rotation configuration contract tests
 
 - Type: test-first.
-- Agent: one clean-context `test-writer` after one of T1-T3 frees a slot.
+- Agent: one clean-context `test-writer`.
 - Owned file: `test/configSchema.test.ts`.
-- Boundary: both schemas and example configuration only.
 - Dependencies: approved spec and plan.
-- Acceptance: intentional red tests prove no top-level `apiBaseUrl`, optional
-  per-device reset shape, POST const, strict reset properties, and example/schema
-  agreement.
-- Validation: focused compile/test; record red result.
+- Acceptance: intentional red tests prove strict optional `rotate` parity in
+  both schemas, removal of legacy rotation fields, preservation of reset, and
+  example/schema agreement.
+- Validation: focused compile/test; record red evidence.
 
-### D1 - Configured URI gateway implementation
+### D1 - Rotation gateway and application implementation
 
 - Type: development.
 - Agent: one clean-context `developer`.
-- Owned file: `src/fan/infrastructures/DeviceIntegrationApiFanResetGateway.ts`.
+- Owned files: new `src/fan/infrastructures/DeviceIntegrationApiFanRotationGateway.ts`,
+  `src/fan/services/FanRotationGatewayInterface.ts`,
+  `src/fan/services/FanRotationServiceInterface.ts`, and
+  `src/fan/services/FanRotationService.ts`.
 - Dependencies: T1 complete.
-- Acceptance: T1 passes; configured full URI validation and existing exact HTTP
-  behavior match the spec; no Homebridge dependency is introduced.
-- Validation: focused T1, changed-file lint, build, and `git diff --check`.
+- Acceptance: T1 passes and the implementation satisfies exact action contract,
+  coalescing, recovery, containment, and onion dependency direction.
+- Validation: focused T1, changed-file lint, build, and diff check.
 
-### D2 - Per-fan accessory reset integration
+### D2 - Rotation accessory and lifecycle integration
 
 - Type: development.
 - Agent: one clean-context `developer`.
-- Owned file: `src/platformAccessory.ts`.
+- Owned files: `src/platformAccessory.ts` and `src/services/FanService.ts`.
 - Dependencies: T2 and D1 complete.
-- Acceptance: T2 passes; reset is optional, exists only as a stable Switch
-  service on the fan accessory, reconciles cached services, uses per-fan timeout,
-  preserves Fanv2 behavior, and contains all reset failures.
-- Validation: focused T2, existing fan tests, changed-file lint, build, and diff
-  check.
+- Acceptance: T2 passes; Rotation Toggle is optional, momentary,
+  stable-subtype, same-accessory, reconciled, failure-contained, independent of
+  Reset, and free of active SwingMode behavior while Fanv2/reset regressions
+  remain passing.
+- Validation: focused T2, existing reset tests, changed-file lint, build, and
+  diff check.
 
-### D3 - Platform global-accessory removal
-
-- Type: development.
-- Agent: one clean-context `developer`.
-- Owned file: `src/platform.ts`.
-- Dependencies: T3 complete.
-- Acceptance: T3 passes; no global reset is composed or registered, the stale
-  global UUID is removed, and configured fan lifecycle behavior is unchanged.
-- Validation: focused T3, build, changed-file lint, and diff check.
-
-### D4 - Per-fan configuration and schema migration
+### D3 - Rotation configuration migration
 
 - Type: development.
 - Agent: one clean-context `developer`.
-- Owned files: `src/dtos/FanResetEndpointInterface.ts`,
+- Owned files: new `src/dtos/FanRotationEndpointInterface.ts`,
   `src/dtos/FanEndpoints.ts`, `config.schema.json`, `package.json`, and
   `config.example.json`.
-- Dependencies: T4 complete.
-- Acceptance: T4 passes; TypeScript and both schemas express the same optional,
-  strict, POST-only reset descriptor; top-level `apiBaseUrl` is absent; package
-  identity, scripts, dependencies, and existing endpoint contracts are intact.
-- Validation: focused T4, JSON parsing, build, changed-file lint where
-  applicable, and diff check.
+- Dependencies: T3 complete.
+- Acceptance: T3 passes; DTOs, both schemas, and example expose one strict
+  optional rotate descriptor, reject legacy fields, and preserve reset and all
+  unrelated package/config behavior.
+- Validation: focused T3, JSON parsing, build, applicable changed-file lint, and
+  diff check.
 
-### D5 - Documentation
+### D4 - Documentation
 
-- Type: documentation; test-first not applicable because it documents tested
-  final behavior.
+- Type: documentation; test-first is not applicable because this unit documents
+  tested final behavior.
 - Agent: one clean-context `developer`.
 - Owned file: `README.md`.
-- Dependencies: D2, D3, and D4 complete.
-- Acceptance: configuration, same-accessory presentation, migration, request
-  contract, failures, limitation, and validation commands match final code and
-  both schemas.
-- Validation: compare examples to schemas and run diff check.
-
-### R1 - Gateway and application review
-
-- Type: independent review; no edits.
-- Agent: one clean-context `code-reviewer`.
-- Scope: D1, gateway/service contracts, T1, and retained service tests.
-- Dependencies: D1 complete.
-- Acceptance: findings cover exact configured URI, POST/body/status/timeout,
-  secret safety, no retry, coalescing, onion direction, tests, and spec/plan fit.
-
-### R2 - Homebridge accessory and lifecycle review
-
-- Type: independent review; no edits.
-- Agent: one clean-context `code-reviewer`.
-- Scope: D2/D3 and T2/T3.
 - Dependencies: D2 and D3 complete.
-- Acceptance: findings cover same-accessory identity, stable service subtype,
-  cached add/remove, no global accessory, HAP states/errors, fan regressions,
-  async containment, tests, and artifact fit.
+- Acceptance: configuration, migration, request contract, momentary semantics,
+  limitations, failures, and validation instructions agree with final code and
+  both schemas; reset documentation remains accurate.
+- Validation: compare examples against schemas and run diff check.
+
+### R1 - Rotation gateway and application review
+
+- Type: independent review; no edits.
+- Agent: one clean-context `code-reviewer`.
+- Scope: T1/D1 and retained reset action contracts.
+- Dependencies: D1 complete.
+- Acceptance: findings cover URI/path/method/body/status, timeout, no retry,
+  secrets, coalescing, recovery, dependency direction, test strength, and
+  spec/plan fit.
+
+### R2 - Accessory and lifecycle review
+
+- Type: independent review; no edits.
+- Agent: one clean-context `code-reviewer`.
+- Scope: T2/D2 and resulting adapter/lifecycle diff.
+- Dependencies: D2 complete.
+- Acceptance: findings cover same-accessory identity, stable subtype, cache
+  reconciliation, SwingMode removal, HAP states/errors, reset independence,
+  fan regressions, async containment, tests, and artifact fit.
 
 ### R3 - Configuration and documentation review
 
 - Type: independent review; no edits.
 - Agent: one clean-context `code-reviewer`.
-- Scope: D4/D5, T4, DTOs, both schemas, example config, and README.
-- Dependencies: D4 and D5 complete.
-- Acceptance: findings cover contract alignment, strictness, migration accuracy,
-  public identifiers, documentation, and artifact fit.
+- Scope: T3/D3/D4, schemas, DTOs, example, package metadata, and README.
+- Dependencies: D3 and D4 complete.
+- Acceptance: findings cover parity, strictness, migration accuracy, reset
+  preservation, package integrity, documentation, and artifact fit.
 
 ### F - Review and QA fixes
 
 - Type: conditional development.
-- Agent: a new clean-context `developer` for each non-overlapping finding.
-- Boundary: smallest files affected by one specific review or main-agent QA
-  finding.
-- Dependencies: corresponding review or QA finding.
-- Acceptance: finding resolved within approved scope and affected checks pass;
-  material fixes receive a clean-context reviewer recheck.
+- Agent: one new clean-context `developer` per non-overlapping finding.
+- Ownership: smallest approved files needed for the specific finding.
+- Dependencies: corresponding review or main-agent QA finding.
+- Acceptance: finding is resolved within approved scope and affected checks
+  pass; material fixes receive an independent reviewer recheck.
 
 ## Shared-File And Integration Rules
 
-- T1/T2/T3 own separate tests and may run concurrently. T4 starts when a slot is
-  free.
-- D1 and D3 may run concurrently because their files do not overlap. D2 waits
-  for D1 because it composes the revised gateway.
-- D4 owns every configuration-contract file and is serialized against package or
-  schema edits by all other units.
-- D5 starts only after runtime/config names and shapes are final.
-- Test files are not rewritten by production developers to fit implementation.
-- The main agent supervises dependencies, ownership, handoffs, integration, and
-  five-minute limits. A timed-out unit is stopped, inspected, preserved, and
-  split into smaller non-overlapping work before reassignment.
-- Behavior or execution changes outside the approved artifacts require an
-  amendment, not an integration workaround.
+- T1, T2, and T3 may run concurrently because ownership does not overlap.
+- D1 and D3 may run concurrently after their respective tests complete.
+- D2 waits for D1 because it composes the new rotation service.
+- D4 waits for D2 and D3 so names and behavior are final.
+- Production developers do not rewrite tests to fit implementation.
+- Schema/package/config files are owned only by D3; accessory/service files are
+  owned only by D2.
+- At five minutes, the main agent stops an active subagent, records completed and
+  partial work, changed files, validation, blockers, and remainder, preserves
+  usable edits, and splits the remainder before assigning a new clean-context
+  agent.
+- Any behavior outside approved artifacts requires amendment rather than an
+  integration workaround.
 
 ## Main-Agent QA
 
 The main agent must:
 
-1. Map every approved acceptance criterion to code, tests, documentation, or an
-   explicitly unavailable runtime check.
-2. Inspect the complete diff for the global reset UUID/accessory, top-level
-   `apiBaseUrl`, stale standalone adapter code, accidental fan-control changes,
-   generated files, secrets, machine-specific config, and out-of-scope edits.
-3. Confirm each fan UUID remains `serialNumber:name` based and reset service
-   changes do not register accessories.
-4. Confirm fans without reset have no Switch and restored fans remove stale
-   reset services when configuration is removed.
-5. Confirm invalid reset configuration preserves Fanv2 functionality and never
-   logs raw endpoint data.
-6. Run `npm test`.
-7. Run `npm run lint` and, if an unchanged baseline blocks it, record the exact
-   baseline paths while separately proving changed-file lint passes.
-8. Run `npm run build`.
-9. Run `npm run prepublishOnly`.
-10. Run `git diff --check` and, after staging, `git diff --cached --check`.
-11. Confirm tests use only fakes, injected fetch, or loopback traffic.
-12. Confirm schemas, TypeScript DTOs, example config, runtime behavior, and
-    README agree.
+1. Map every acceptance criterion to code, tests, docs, or an explicitly
+   unavailable runtime check.
+2. Inspect the complete diff for unintended reset changes, remaining
+   `startRotation`/`stopRotation` or SwingMode bindings, separate action
+   accessories, secrets, generated output, machine-specific config, and
+   out-of-scope edits.
+3. Confirm fan UUID remains `serialNumber:name` based.
+4. Confirm optional Reset and Rotation Toggle services reconcile independently
+   with distinct stable subtypes.
+5. Confirm invalid rotation configuration preserves Fanv2 and Reset and logs no
+   raw endpoint.
+6. Confirm rotation success makes no final physical or `isRotating` state claim.
+7. Run `npm test`.
+8. Run `npm run lint`; if unchanged CRLF baseline errors remain, record exact
+   paths and separately run changed-file lint.
+9. Run `npm run build`.
+10. Run `npm run prepublishOnly` and distinguish any unchanged baseline blocker.
+11. Run `git diff --check`, then after staging `git diff --cached --check`.
+12. Confirm tests use only deterministic local fakes/injected fetch/loopback.
+13. Confirm DTOs, both schemas, example, runtime behavior, and README agree.
 
-Starting Homebridge, interacting with Home/HomeKit, or calling a live API is
-operational validation and must not occur without explicit user authorization
-and target confirmation. If unavailable, list it as not run and keep delivery
-DRAFT because same-accessory Home presentation is unverified.
+Starting Homebridge, using Home/HomeKit, or calling a live API is operational
+validation and requires explicit user authorization and target confirmation. If
+unavailable, list it as not run and keep delivery DRAFT.
 
 ## Documentation And Contract Policy
 
-- Update only repository documentation and configuration artifacts listed here.
-- Do not edit the Device Integration API OpenAPI document, source, specs, or
+- Update only repository artifacts listed in this plan.
+- Do not edit the Device Integration API repository, OpenAPI, specs, source, or
   tests.
-- Document that reset changes API application state only and does not prove
-  physical fan state.
-- Do not modify `AGENTS.md` unless an approved file boundary becomes factually
-  stale.
+- Document that reset affects API application state only and rotation is a
+  momentary accepted action with no final-state guarantee.
+- Do not modify public plugin identifiers.
 
 ## Commit, Push, And Completion
 
 - Before staging, reconcile every modified, added, deleted, renamed, and
-  untracked path; preserve and identify unrelated user changes.
-- Stage every accepted in-scope path, including approved spec/plan updates,
-  production code, tests, schemas, example config, and documentation.
+  untracked path. Preserve and identify unrelated user changes.
+- Stage every accepted in-scope path, including approved artifacts, production
+  code, tests, schemas, example config, and documentation.
 - Inspect `git diff --cached --name-status`, the complete staged diff, and
   `git diff --cached --check` before committing.
-- Use one follow-up project-convention commit:
-  `feature: Move fan reset control onto configured fans` only if all required
-  validation including authorized runtime/Home validation passes; otherwise use
-  `feature: DRAFT move fan reset control onto configured fans`.
-- Push the existing feature branch to `origin` without force and verify it is no
-  longer ahead of its upstream.
-- After push, inspect final status and do not report completion while any
-  accepted in-scope path is uncommitted, unpushed, hidden, or omitted.
-- Completion reporting must include summary, review/QA findings and resolutions,
-  validation run/not run, risks, documentation, commit/push status, final or
-  DRAFT state, skipped/blocked requirements, Definition of Done status, and
-  final main-agent acceptance.
+- Use one follow-up commit:
+  - final only if all required validation including authorized runtime/Home
+    validation passes: `feature: Add per-fan rotation toggle action`;
+  - otherwise: `feature: DRAFT add per-fan rotation toggle action`.
+- Push `feature/homebridge-fan-reset-trigger` to `origin` without force and
+  verify it is no longer ahead of its upstream.
+- Inspect final status and do not report completion while any accepted in-scope
+  change is uncommitted, unpushed, hidden, or omitted.
+- Completion reporting must cover summary, review/QA findings and resolutions,
+  validation run/not run, risks, documentation, commit/push state, final or
+  DRAFT status, skipped/blocked requirements, Definition of Done, and final
+  main-agent acceptance.

@@ -22,12 +22,8 @@
           "uri": "http://pi11.pi.home/api/ventilator/speed/${speed}",
           "method": "PUT"
         },
-        "startRotation": {
-          "uri": "http://pi11.pi.home/api/ventilator/rotate",
-          "method": "POST"
-        },
-        "stopRotation": {
-          "uri": "http://pi11.pi.home/api/ventilator/rotate",
+        "rotate": {
+          "uri": "http://pi11.pi.home/api/v1/fan/rotate",
           "method": "POST"
         },
         "reset": {

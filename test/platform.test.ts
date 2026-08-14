@@ -135,7 +135,7 @@ function fixture(config: Record<string, unknown> = { name: 'Reset Fan', devices:
   };
 }
 
-const fanConfig = (name = 'Living Room Fan', reset = true) => ({
+const fanConfig = (name = 'Living Room Fan', reset = true, rotate = false) => ({
   name,
   manufacturer: 'Generic',
   model: 'IR Fan',
@@ -143,6 +143,7 @@ const fanConfig = (name = 'Living Room Fan', reset = true) => ({
   endpoints: {
     getStatus: { uri: 'http://fan.example.test/state', method: 'GET' },
     ...(reset ? { reset: { uri: 'http://fan.example.test/api/v1/fan/reset', method: 'POST' } } : {}),
+    ...(rotate ? { rotate: { uri: 'http://fan.example.test/api/v1/fan/rotate', method: 'POST' } } : {}),
   },
 });
 
@@ -265,6 +266,47 @@ test('cached fan gains one stable reset service through platform lifecycle when 
     view.platform.discoverDevices();
     assert.equal(cached.services.size, 3);
     assert.equal(cached.services.get(view.api.hap.Service.Switch)?.subtype, 'fan-reset');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('configured rotation stays on the fan accessory and creates no separate accessory', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ isOn: false, speed: 0, isRotating: false }), { status: 200 });
+  try {
+    const view = fixture({ name: 'SimpleIrFan', devices: [fanConfig('Living Room Fan', false, true)] });
+    view.launch();
+    await Promise.resolve();
+    assert.equal(view.registered.length, 1);
+    assert.equal(view.registered[0]?.UUID, view.api.hap.uuid.generate('FAN-001:Living Room Fan'));
+    assert.equal(view.registered[0]?.services.get(view.api.hap.Service.Switch)?.subtype, 'fan-rotation-toggle');
+    assert.equal(view.registered.some((accessory) => accessory.UUID === view.api.hap.uuid.generate('fan-rotation-trigger')), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('cached fan rotation service is removed or added through platform lifecycle without changing fan UUID', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ isOn: false, speed: 0, isRotating: false }), { status: 200 });
+  try {
+    const uuid = `uuid:${'FAN-001:Living Room Fan'}`;
+    const removed = fixture({ name: 'SimpleIrFan', devices: [fanConfig('Living Room Fan', false, false)] });
+    const cached = new FakePlatformAccessory('Living Room Fan', uuid);
+    cached.services.set(removed.api.hap.Service.Switch, new FakeService(removed.api.hap.Service.Switch, 'fan-rotation-toggle'));
+    removed.platform.configureAccessory(cached as never);
+    removed.launch();
+    await Promise.resolve();
+    assert.equal(cached.UUID, uuid);
+    assert.equal(cached.services.has(removed.api.hap.Service.Switch), false);
+
+    const added = fixture({ name: 'SimpleIrFan', devices: [fanConfig('Living Room Fan', false, true)] });
+    added.platform.configureAccessory(cached as never);
+    added.launch();
+    await Promise.resolve();
+    assert.equal(cached.UUID, uuid);
+    assert.equal(cached.services.get(added.api.hap.Service.Switch)?.subtype, 'fan-rotation-toggle');
   } finally {
     globalThis.fetch = originalFetch;
   }
