@@ -1,260 +1,305 @@
-# SPEC-001 - Homebridge Fan Reset Trigger
+# SPEC-001 - Homebridge Fan Reset And Rotation Triggers
 
 Status: Approved
 Date: 2026-08-10
+Updated: 2026-08-14
 
-## Iteration: Optional Per-Fan Reset Control
+## Iteration: Reset-Style Per-Fan Rotation Toggle
 
-This iteration supersedes the previously approved platform-level reset
-accessory design.
+This iteration adds an optional momentary Rotation Toggle Switch to each
+configured fan and supersedes the existing stateful `SwingMode`,
+`startRotation`, and `stopRotation` integration.
 
-Delta from the previous behavior:
+Delta from the previously approved behavior:
 
-- Move reset configuration from top-level `apiBaseUrl` to optional
-  `devices[].endpoints.reset`.
-- Expose reset as a secondary momentary Switch service on the same HomeKit
-  accessory as the configured fan.
-- Do not create or retain a separate reset accessory.
-- Preserve all existing Fanv2 power, speed, oscillation, status, authentication,
-  device identity, and cache behavior except where reset-service reconciliation
-  is explicitly described below.
+- Add optional `devices[].endpoints.rotate` alongside the approved per-fan
+  `reset` endpoint.
+- Expose rotation as a second, independently configured momentary Switch service
+  on the same HomeKit accessory as the fan and Reset Switch.
+- Replace the existing `Fanv2.SwingMode` handlers and separate
+  `startRotation`/`stopRotation` endpoint configuration with one physical-toggle
+  action.
+- Invoke the Device Integration API's bodyless
+  `POST /api/v1/fan/rotate` contract with the same strict transport, timeout,
+  coalescing, state-transition, and failure-containment rules used by reset.
+- Preserve every approved reset behavior and all existing Fanv2 power, speed,
+  status, authentication, identity, and cache behavior except where removal of
+  the superseded SwingMode integration is explicitly described.
+
+## Preserved Iteration: Optional Per-Fan Reset Control
+
+The approved reset behavior remains unchanged:
+
+- Reset configuration is optional under `devices[].endpoints.reset`.
+- Reset is a momentary Switch on the configured fan's existing accessory.
+- No separate reset accessory or top-level `apiBaseUrl` is used.
+- Cached reset services and the superseded global reset accessory are reconciled
+  without changing configured fan identity.
 
 ## Purpose
 
-Allow each configured fan to opt into the Device Integration API reset action
-without creating a separate HomeKit accessory.
+Allow each configured fan to opt into the Device Integration API reset and
+physical rotation-toggle actions without creating separate HomeKit accessories
+or representing a physical toggle command as deterministic ON/OFF state.
 
 ## Problem
 
-The current reset implementation creates one platform-level reset accessory and
-uses a global API base URL. A reset is conceptually an action for a configured
-fan, so its endpoint and HomeKit control should belong to that fan. Users who do
-not configure a reset endpoint should see no reset control.
+Reset is already modeled correctly as an optional momentary action on each fan.
+Rotation is currently modeled differently: `Fanv2.SwingMode` ON and OFF writes
+select separate `startRotation` and `stopRotation` endpoints even though the
+example points both fields to one physical-toggle command.
+
+The current Device Integration API exposes only bodyless
+`POST /api/v1/fan/rotate`. Its OpenAPI labels the operation as a toggle, while
+its current service persists `isRotating=true` whenever the fan is powered.
+Consequently, Homebridge cannot safely claim deterministic desired ON/OFF state
+from this endpoint. Rotation must be presented as a momentary action, like
+reset, with no final-state claim.
 
 ## Scope
 
 In scope:
 
-- Add optional `reset` configuration to each fan's existing `endpoints` object.
-- Represent reset with a momentary HomeKit Switch service attached to the same
-  `PlatformAccessory` as that fan's Fanv2 service.
-- Invoke the configured reset URI as a bodyless `POST`.
-- Treat only HTTP `202 Accepted` as success.
-- Keep reset behavior deterministic across success, failure, repeated writes,
-  Homebridge restarts, and cached fan-accessory restoration.
-- Remove the top-level `apiBaseUrl` configuration and platform-level reset
-  accessory behavior.
-- Remove a cached platform-level reset accessory through normal platform
-  reconciliation.
-- Add or remove the per-fan reset Switch service when a restored fan's reset
-  configuration is added or removed.
-- Preserve all existing configured fan controls and endpoint behavior.
+- Keep optional per-fan reset configuration and behavior unchanged.
+- Add optional per-fan `endpoints.rotate` configuration.
+- Attach a momentary Rotation Toggle Switch to the same fan accessory.
+- Send bodyless `POST` requests to the configured reset or rotation URI.
+- Treat only HTTP `202 Accepted` as action success.
+- Use per-fan timeout, no retry, per-action coalescing, contained failures, and
+  deterministic pending-to-idle Switch transitions.
+- Remove `endpoints.startRotation` and `endpoints.stopRotation` from runtime
+  configuration, TypeScript DTOs, both schemas, examples, and documentation.
+- Remove active `Fanv2.SwingMode` handlers and reconcile the superseded
+  characteristic where the Homebridge API permits it.
+- Reconcile optional Reset and Rotation Toggle services on cached fan
+  accessories without changing fan accessory identity.
+- Preserve fan power, speed, status, authentication, registration, restoration,
+  and removal behavior.
 
 Out of scope:
 
-- Changing existing fan start, stop, speed, rotation, or status behavior.
-- Querying fan status or changing Fanv2 characteristic state after reset.
-- Changing the Device Integration API, OpenAPI contract, or persistence
-  behavior.
-- Adding reset authentication, request headers, request bodies, query
-  parameters, retries, telemetry, command history, or audit events.
-- Providing a guarantee that the physical fan is OFF after reset. Reset changes
-  and persists Device Integration API application state only.
-- Providing a native HomeKit push-button service. HomeKit exposes no native
-  button service for this use case, so a momentary Switch is used.
+- Changing the Device Integration API, OpenAPI, persistence, terminal command,
+  or IR behavior.
+- Claiming reset changed the physical fan state.
+- Claiming rotation is now ON or OFF after the API accepts a toggle command.
+- Reading or publishing `isRotating` through the new Rotation Toggle Switch.
+- Retaining stateful SwingMode or supporting old and new rotation configuration
+  shapes concurrently.
+- Adding request bodies, headers, query parameters, authentication, retries,
+  telemetry, history, or audit events to reset or rotation actions.
+- Creating separate HomeKit accessories for reset or rotation.
+- Providing native HomeKit push-button services; momentary Switch services are
+  used because HomeKit has no native button service for these actions.
 
 ## Definitions
 
 - **Configured fan:** One entry in the platform's `devices` array.
-- **Reset endpoint:** Optional `devices[].endpoints.reset` configuration with an
-  absolute URI and method fixed to `POST`.
-- **Reset Switch:** A secondary HomeKit Switch service on the configured fan's
-  existing accessory. It is OFF while idle, ON while its request is pending,
-  and OFF again when the request settles.
-- **Reset in progress:** The interval from accepting an idle-to-ON reset write
-  until its HTTP request succeeds, fails, or times out.
-- **Idle:** No reset request is in progress for that configured fan.
+- **Reset endpoint:** Optional `devices[].endpoints.reset` with an absolute URI
+  and method fixed to `POST`.
+- **Rotation endpoint:** Optional `devices[].endpoints.rotate` with an absolute
+  URI and method fixed to `POST`.
+- **Reset Switch:** Momentary Switch on the fan accessory whose ON action asks
+  the Device Integration API to reset application state.
+- **Rotation Toggle Switch:** Momentary Switch on the fan accessory whose ON
+  action asks the Device Integration API to execute its physical rotation
+  toggle command.
+- **Action in progress:** The interval from accepting an idle-to-ON write until
+  that action's HTTP request succeeds, fails, or times out.
+- **Action idle:** No request for that specific action is in progress. Reset and
+  rotation have independent idle states.
 
 ## Inputs And Constraints
 
+### Reset configuration
+
 - `devices[].endpoints.reset` is optional.
-- When omitted, that fan exposes no reset Switch and makes no reset request.
-- When present, `reset` contains:
-  - `uri`: an absolute `http://` or `https://` URI whose path is exactly
-    `/api/v1/fan/reset`;
+- When present it contains only:
+  - `uri`: absolute HTTP(S) URI with exact path `/api/v1/fan/reset`;
   - `method`: exactly `POST`.
-- The reset URI must not contain a query string, fragment, or embedded
-  credentials.
-- Reset configuration accepts no body template, headers, query parameters, or
-  authentication fields. Existing device authentication is not applied to the
-  reset request because the reset API contract is unauthenticated.
-- The reset request has no body.
-- Reset uses the configured fan's `timeoutMs`, defaulting to five seconds when
-  omitted.
-- Reset requests are not retried automatically.
-- Each configured fan has an independent reset service and in-flight request.
-- Concurrent reset writes for the same fan share one in-flight request.
-- Reset requests for different configured fans do not coalesce with one another.
-- The fan accessory UUID remains generated from its existing
-  `serialNumber:name` identity; adding, removing, or changing the reset endpoint
-  does not change accessory identity.
-- The reset Switch service uses a stable subtype within the fan accessory so
-  cached restoration does not create duplicate services.
-- Homebridge, HomeKit, HTTP, logging, filesystem, and runtime concerns remain
-  outside domain and application contracts in accordance with the repository's
-  onion-architecture dependency direction.
+- Query strings, fragments, embedded credentials, body templates, headers,
+  authentication, and extra properties are prohibited.
+
+### Rotation configuration
+
+- `devices[].endpoints.rotate` is optional.
+- When present it contains only:
+  - `uri`: absolute HTTP(S) URI with exact path `/api/v1/fan/rotate`;
+  - `method`: exactly `POST`.
+- Query strings, fragments, embedded credentials, body templates, headers,
+  authentication, and extra properties are prohibited.
+- `startRotation` and `stopRotation` are no longer accepted.
+
+### Shared action constraints
+
+- Requests are bodyless and unauthenticated. Existing `devices[].auth` is not
+  applied to Device Integration API reset or rotation actions.
+- Each request uses that fan's `timeoutMs`, defaulting to 5000 milliseconds.
+- Requests are not retried automatically.
+- Only HTTP `202 Accepted` is successful; response bodies are ignored.
+- Concurrent writes for the same action on the same fan share one in-flight
+  request and outcome log.
+- Different fans remain independent.
+- Reset and rotation on the same fan remain independent and do not coalesce or
+  block one another.
+- Fan accessory UUID remains generated from `serialNumber:name`; action
+  configuration does not change identity.
+- Reset and Rotation Toggle use distinct stable service subtypes.
+- Domain and application contracts remain independent of Homebridge, HomeKit,
+  HTTP, logging, filesystem, and runtime concerns under the repository's onion
+  architecture.
 
 ## Deterministic Behavior
 
 ### 1. Platform startup and reconciliation
 
-- The platform creates and restores configured fan accessories exactly as it
-  does today.
-- A fan with a valid reset endpoint has one Fanv2 service and one reset Switch
-  service on the same HomeKit accessory.
-- A fan without a reset endpoint has its existing Fanv2 service and no reset
-  Switch.
-- No platform-level reset accessory is registered.
-- A cached platform-level reset accessory from the superseded design is removed
-  because its UUID is not part of the configured fan UUID set.
-- On restoration, a newly configured reset endpoint adds the reset Switch to the
-  existing fan accessory without changing its UUID.
-- On restoration, removing reset configuration removes the cached reset Switch
-  from that fan accessory without removing the Fanv2 service.
-- If a supplied per-fan reset endpoint is invalid, the plugin logs a concise
-  device-specific configuration error without secrets, exposes no usable reset
-  Switch for that fan, and preserves the fan's other services and controls.
-- Configuration errors and service reconciliation errors are contained within
-  the plugin boundary.
+- The platform registers and restores configured fan accessories as before.
+- No platform-level reset or rotation accessory is created.
+- A valid reset endpoint produces exactly one Reset Switch on the fan accessory.
+- A valid rotate endpoint produces exactly one Rotation Toggle Switch on the
+  fan accessory.
+- Missing action configuration produces no Switch for that action.
+- Reset and rotation configuration may be enabled independently.
+- Adding an action to a restored fan adds only that stable-subtype Switch.
+- Removing an action removes only its cached Switch and preserves Fanv2 and the
+  other action.
+- The superseded cached global reset accessory is removed through normal UUID
+  reconciliation.
+- Fanv2 no longer binds SwingMode get/set handlers. A cached SwingMode
+  characteristic is removed where supported and is never rebound as an active
+  control.
+- Invalid action configuration logs one concise device-specific configuration
+  error without secrets, exposes no usable Switch for that action, and preserves
+  the fan and the other action.
+- Configuration and service-reconciliation failures are contained within the
+  plugin boundary.
 
-### 2. Idle reset activation
+### 2. Momentary action activation
 
-- When HomeKit writes ON to an idle fan's reset Switch, that fan starts exactly
-  one reset request and the Switch reports ON while it is pending.
-- The request is a bodyless `POST` to the configured reset URI.
-- A `202 Accepted` response completes the action successfully. The response body
-  is not parsed and does not affect the result.
-- After success, the reset Switch returns to OFF and Homebridge logs the fan's
-  successful reset at informational level.
-- Reset success does not change, query, or publish Fanv2 power, speed, or
-  oscillation characteristics.
+- An ON write while that action is idle starts exactly one request.
+- The corresponding Switch reports ON while its request is pending.
+- Reset sends a bodyless `POST` to `/api/v1/fan/reset`.
+- Rotation sends a bodyless `POST` to `/api/v1/fan/rotate`.
+- A `202 Accepted` response succeeds regardless of response body.
+- Success returns only the corresponding Switch to OFF and logs one concise
+  informational result for the configured fan.
+- OFF writes make no request and leave an idle Switch OFF.
+- A concurrent ON write for the same action and fan shares the in-flight result.
+- A later ON write after settlement starts a new request.
+- Different fans and different actions on one fan remain independent.
 
-### 3. OFF writes and concurrent activation
+### 3. Failure handling
 
-- An OFF write never invokes the reset endpoint and leaves the reset Switch OFF
-  when idle.
-- A second ON write for the same fan while reset is in progress sends no second
-  request and observes the shared in-flight result.
-- After settlement returns the Switch to OFF, a later ON write sends a new
-  request.
-- Concurrent ON writes on different fan accessories send one request per fan.
+- Timeout, network error, invalid runtime configuration, or any status other
+  than `202` fails that action.
+- Failure returns only the corresponding Switch to OFF.
+- Homebridge logs one concise device-specific error without endpoint secrets.
+- HomeKit receives `SERVICE_COMMUNICATION_FAILURE` for the failed write.
+- Failures are not retried and do not prevent later deliberate activation.
+- Reset failure does not affect rotation or Fanv2; rotation failure does not
+  affect reset or Fanv2.
+- All asynchronous failures are caught within the plugin boundary and cannot
+  become unhandled rejections or terminate Homebridge.
 
-### 4. Failure handling
+### 4. Action meaning
 
-- A timeout, network error, invalid runtime reset configuration, or any HTTP
-  status other than `202` is a failed reset.
-- On request failure, the reset Switch returns to OFF, Homebridge logs a concise
-  error identifying the configured fan without logging secrets, and HomeKit
-  reports `SERVICE_COMMUNICATION_FAILURE` for the reset write.
-- A failed reset is not retried and does not prevent that fan from accepting a
-  later deliberate reset.
-- Reset failure does not disable or change the fan's existing Fanv2 controls.
-- All asynchronous failures are caught within the plugin boundary; none may
-  become an unhandled rejection or terminate Homebridge.
-
-### 5. API action meaning
-
-- Successful reset means the Device Integration API accepted and persisted its
-  default OFF application state: `isOn=false`, `speed=0`, and
-  `isRotating=false`.
-- The reset Switch does not claim the API issued an IR command or reconciled the
-  physical fan.
+- Reset success means only that the API accepted and persisted its default
+  application state: `isOn=false`, `speed=0`, `isRotating=false`. It does not
+  claim an IR command ran or the physical fan changed.
+- Rotation success means only that the API accepted its physical toggle command.
+  It does not claim rotation is now ON or OFF, publish `isRotating`, or correct
+  the API's current persisted-state semantics.
+- Neither action changes, queries, or publishes Fanv2 power or speed state.
 
 ## Assumptions
 
-- Homebridge can reach each configured reset URI from its runtime network.
-- The Device Integration API OpenAPI contract remains authoritative for the
-  reset path, method, lack of body, authentication, and response statuses.
-- A secondary momentary Switch on the existing fan accessory is the intended
-  HomeKit affordance. Home may render services as tiles, but reset remains part
-  of the same accessory and does not get a separate accessory UUID.
-- Existing configured-fan endpoint behavior on `origin/latest` remains the
-  regression baseline.
+- Homebridge can reach each configured action URI.
+- Current Device Integration API OpenAPI and controller contracts are
+  authoritative for method, path, absence of request body, and response status.
+- Reset and rotation API actions are unauthenticated.
+- Home may render secondary services as separate tiles, but both Switches remain
+  services of the existing fan accessory and receive no accessory UUID.
+- Existing configured-fan power, speed, status, identity, and cache behavior on
+  the current branch remain the regression baseline.
 
 ## Regression And Compatibility Impact
 
-- Removing top-level `apiBaseUrl` is a configuration-breaking change from the
-  superseded reset implementation. Users must move reset configuration into
-  each intended fan's `endpoints.reset` entry.
-- Existing fan configurations without reset continue working and expose no
-  reset Switch.
-- Existing fan accessory UUIDs do not change.
-- Cached fan accessories gain or lose only the reset Switch service according
-  to current configuration.
-- The cached global reset accessory is unregistered once and is not recreated.
-- A reset failure affects only that fan's reset activation.
-- No change is permitted to existing fan endpoint requests or Fanv2 behavior.
+- Approved reset configuration and behavior remain compatible.
+- Removing `startRotation` and `stopRotation` is a deliberate configuration
+  break. Users must replace them with one optional `endpoints.rotate` entry.
+- Stateful Fanv2 SwingMode is deliberately removed and replaced by a momentary
+  Rotation Toggle action.
+- Configurations without reset or rotation continue exposing the existing fan
+  power, speed, and status behavior.
+- Fan accessory UUIDs remain unchanged.
+- Cached accessories gain or lose only the applicable action services and the
+  superseded SwingMode characteristic.
+- A failure affects only the invoked action for that fan.
 
 ## Validation Plan
 
 - Add deterministic tests proving:
-  - device configurations without `endpoints.reset` expose no reset Switch;
-  - valid per-fan reset configuration exposes one reset Switch on that fan's
-    existing accessory and creates no separate accessory;
-  - reset service addition/removal reconciles correctly on cached fan
-    accessories;
-  - the cached global reset accessory is removed;
-  - reset URIs reject non-HTTP(S), wrong paths, queries, fragments, credentials,
-    and non-POST methods without disabling other fan controls;
-  - the fan's `timeoutMs` and five-second default are applied;
-  - one idle ON activation produces exactly one bodyless POST to the configured
-    reset URI and only `202` succeeds;
-  - OFF writes produce no request;
-  - same-fan concurrent ON writes coalesce while different-fan requests remain
-    independent;
-  - success and every failure return only the reset Switch to OFF;
-  - failures become HomeKit communication failures and remain retryable;
-  - existing fan registration, power, speed, rotation, and status tests remain
-    unchanged or are extended as regression coverage.
-- Validate both `config.schema.json` and the package-embedded Homebridge schema.
+  - optional reset behavior remains unchanged;
+  - optional rotate configuration adds exactly one stable Rotation Toggle
+    Switch to the existing fan accessory and creates no separate accessory;
+  - missing or invalid rotate configuration produces no Rotation Toggle Switch
+    while preserving Fanv2 and Reset;
+  - cached Rotation Toggle add/remove reconciliation preserves fan UUID and
+    other services;
+  - SwingMode handlers and `startRotation`/`stopRotation` configuration are
+    absent;
+  - strict rotate URI validation rejects wrong schemes, paths, queries,
+    fragments, credentials, malformed ports, extra fields, and non-POST methods;
+  - rotate requests are bodyless, unauthenticated, use per-fan/default timeout,
+    do not retry, and accept only `202`;
+  - ON remains pending until settlement, OFF makes no request, and all outcomes
+    return the action Switch to OFF;
+  - same-fan same-action writes coalesce while different fans and reset/rotation
+    actions remain independent;
+  - failures are secret-safe, map to HomeKit communication failures, remain
+    retryable, and do not alter other controls;
+  - existing power, speed, status, registration, restoration, and reset tests
+    remain passing.
+- Validate `config.schema.json`, the package-embedded schema, DTOs, and
+  `config.example.json` for identical action contracts.
 - Run `npm test`, `npm run lint`, `npm run build`, `npm run prepublishOnly`, and
   `git diff --check`.
-- Use local fakes or loopback HTTP only; do not contact a live API during
-  deterministic tests.
-- If Homebridge/Home runtime validation is unavailable, keep delivery DRAFT and
-  list the unverified same-accessory service presentation explicitly.
+- Deterministic tests use fakes, injected fetch, or loopback HTTP only.
+- Starting Homebridge/Home or calling a live API requires explicit user
+  authorization and target confirmation.
+- If runtime validation is unavailable, delivery remains DRAFT and lists the
+  unverified same-accessory service presentation explicitly.
 
 ## Documentation Requirements
 
-- Document optional `devices[].endpoints.reset` in README, both schemas, and
+- Preserve the existing reset migration and behavior documentation.
+- Document optional `devices[].endpoints.rotate` in README, both schemas, and
   `config.example.json`.
-- Remove top-level `apiBaseUrl` documentation and schema entries.
-- Explain that reset is a momentary Switch service on the configured fan's
-  existing accessory, not a separate accessory.
-- Document the bodyless POST, exact `202` success rule, timeout, no-retry
-  behavior, unauthenticated request, failure behavior, and application-state-only
-  limitation.
-- Document migration from the superseded top-level `apiBaseUrl` configuration.
+- Document migration from `startRotation`/`stopRotation` and stateful SwingMode
+  to the momentary Rotation Toggle Switch.
+- Document the exact bodyless `/api/v1/fan/rotate` POST contract, exact `202`
+  success, timeout, no retry, unauthenticated behavior, pending/OFF transitions,
+  coalescing, and failure behavior.
+- State explicitly that Rotation Toggle is an action and does not report or
+  guarantee final physical or persisted rotation state.
 
 ## Acceptance Criteria
 
-- A configured fan without `endpoints.reset` has no reset control.
-- A configured fan with a valid reset endpoint has exactly one momentary reset
-  Switch service on its existing fan accessory.
-- The platform creates no separate reset accessory.
-- The fan accessory UUID is unchanged when reset configuration changes.
-- One idle activation sends exactly one bodyless POST to that fan's configured
-  reset URI; only `202 Accepted` succeeds.
-- The reset Switch returns to OFF after every outcome and OFF writes never call
-  the endpoint.
-- Concurrent activations coalesce per fan, not across fans.
-- Invalid reset configuration and request failures are contained, logged without
-  secrets, surfaced as HomeKit communication failures when applicable, and do
-  not affect existing fan controls.
-- Cached global reset accessories and stale per-fan reset services are removed.
-- Existing fan power, speed, rotation, status, authentication, identity, and
-  cache behavior remain unchanged.
-- Runtime configuration, both schemas, example configuration, tests, and README
+- All previously approved reset acceptance criteria remain satisfied.
+- A fan without `endpoints.rotate` has no Rotation Toggle control.
+- A fan with a valid rotate endpoint has exactly one momentary Rotation Toggle
+  Switch on its existing accessory and no separate accessory.
+- One idle activation sends exactly one bodyless unauthenticated POST to the
+  configured `/api/v1/fan/rotate` URI; only `202 Accepted` succeeds.
+- The Switch is ON only while pending, returns OFF after every outcome, and OFF
+  writes never call the API.
+- Concurrent rotation activations coalesce per fan, not across fans or with
+  reset.
+- Invalid rotation configuration and request failures are contained,
+  secret-safe, retryable, and isolated from Fanv2 and Reset controls.
+- `startRotation`, `stopRotation`, and active SwingMode handlers are absent.
+- Power, speed, status, authentication, identity, registration, restoration,
+  reset, and unrelated cache behavior remain unchanged.
+- Runtime config, TypeScript DTOs, both schemas, example config, tests, and README
   agree.
 - Required deterministic validation passes, or delivery is explicitly DRAFT
-  with each unavailable validation step listed.
+  with every unavailable validation step listed.

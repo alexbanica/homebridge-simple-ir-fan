@@ -8,6 +8,7 @@ A Homebridge dynamic platform plugin that exposes configurable HTTP-controlled f
 - Power, speed, and oscillation controls backed by configurable HTTP endpoints.
 - Status refresh from each device's configured `getStatus` endpoint.
 - One stable HomeKit `Switch` service per fan (where configured) for resetting Device Integration API application state.
+- One stable HomeKit `Switch` service per fan (where configured) for toggling physical fan rotation.
 - Cached accessory restoration and removal of devices no longer present in configuration.
 
 ## Requirements
@@ -51,8 +52,7 @@ See [`config.schema.json`](./config.schema.json) for the Homebridge UI contract 
         "start": { "uri": "http://fan-api/api/ventilator/start", "method": "POST" },
         "stop": { "uri": "http://fan-api/api/ventilator/stop", "method": "POST" },
         "setSpeed": { "uri": "http://fan-api/api/ventilator/speed/${speed}", "method": "PUT" },
-        "startRotation": { "uri": "http://fan-api/api/ventilator/rotate", "method": "POST" },
-        "stopRotation": { "uri": "http://fan-api/api/ventilator/rotate", "method": "POST" },
+        "rotate": { "uri": "http://fan-api/api/v1/fan/rotate", "method": "POST" },
         "reset": { "uri": "http://fan-api/api/v1/fan/reset", "method": "POST" },
         "getStatus": { "uri": "http://fan-api/api/ventilator/state", "method": "GET" }
       }
@@ -61,7 +61,7 @@ See [`config.schema.json`](./config.schema.json) for the Homebridge UI contract 
 }
 ```
 
-Each device supports optional authentication headers or a bearer token through its `auth` configuration. Fan endpoint behavior remains independent of the reset trigger.
+Each device supports optional authentication headers or a bearer token through its `auth` configuration. Fan endpoint behavior remains independent of the reset and rotation toggles. Coalescing is per fan and per action: concurrent reset writes on one fan share a request, concurrent rotation writes on one fan share a request, and reset plus rotation on the same fan remain independent.
 
 ### Reset configuration migration
 
@@ -70,6 +70,12 @@ Each device supports optional authentication headers or a bearer token through i
 - Remove top-level `apiBaseUrl` from your config.
 - Add optional `reset` under each fan’s `endpoints` object as `devices[].endpoints.reset`.
 - The new per-fan `reset` configuration replaces the previous platform-level reset accessory behavior.
+
+### Rotation configuration migration
+
+- Replace `devices[].endpoints.startRotation` and `devices[].endpoints.stopRotation` with a single `devices[].endpoints.rotate` entry.
+- Remove any HomeKit `SwingMode` expectations from the fan accessory. Rotation is now exposed as a momentary `Switch`, not as a stateful HomeKit swing control.
+- Add `rotate` under the same `devices[].endpoints` object as `reset`, not at the platform root or inside another nested object.
 
 ## Reset switch behavior
 
@@ -82,7 +88,7 @@ The platform exposes one stable momentary `Switch` service on the fan’s own ac
 - OFF writes do not contact the API.
 - The switch reports `ON` while the request is pending and returns to `OFF` after success or failure.
 - Failures are logged and surfaced to HomeKit as `SERVICE_COMMUNICATION_FAILURE` without escaping the plugin boundary.
-- Concurrent ON writes on the same fan reuse one in-flight request.
+- Concurrent ON writes on the same fan for reset reuse one in-flight request.
 - ON writes on different fans are independent.
 
 The reset endpoint must match the full URI with method `POST` and path `/api/v1/fan/reset`.
@@ -94,6 +100,29 @@ If configured, the reset endpoint applies only to API application state (`isOn=f
 
 When valid reset configuration is removed, no reset switch is exposed for that fan.
 
+## Rotation toggle behavior
+
+The platform exposes one stable momentary `Switch` service on the fan’s own accessory:
+
+- An ON write sends exactly one bodyless `POST` to the configured `devices[].endpoints.rotate.uri`.
+- Only HTTP `202 Accepted` is considered successful.
+- The request times out after the fan’s configured `timeoutMs`, defaulting to `5000`.
+- No automatic retries are performed.
+- OFF writes do not contact the API.
+- The switch reports `ON` while the request is pending and returns to `OFF` after success or failure.
+- Failures are logged and surfaced to HomeKit as `SERVICE_COMMUNICATION_FAILURE` without escaping the plugin boundary.
+- Concurrent ON writes on the same fan for rotation reuse one in-flight request.
+- ON writes on different fans are independent.
+
+The rotation endpoint must match the full URI with method `POST` and path `/api/v1/fan/rotate`.
+It must use `http://` or `https://`, and it must not include a query string, fragment, or embedded credentials.
+
+Fan-level authentication configured on `devices[].auth` is not applied to rotation requests. Rotation calls are unauthenticated.
+
+If configured, the rotation endpoint means only that the Device Integration API accepted the toggle command. It does not claim the fan is now rotating, does not publish `isRotating`, and does not guarantee the final physical fan state.
+
+When valid rotation configuration is removed, no rotation toggle switch is exposed for that fan.
+
 ## Validation
 
 ```shell
@@ -103,7 +132,7 @@ npm run build
 npm run prepublishOnly
 ```
 
-Runtime validation requires starting Homebridge with the intended configuration, activating the reset Switch in Home, and confirming it returns to OFF after the API request settles.
+Runtime validation requires starting Homebridge with the intended configuration, activating the reset or rotation Switch in Home, and confirming it returns to OFF after the API request settles.
 
 ## License
 

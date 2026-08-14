@@ -2,9 +2,13 @@ import type { CharacteristicValue, Logger, PlatformAccessory, Service } from 'ho
 
 import { FanDevice } from './dtos/FanDevice.js';
 import type { FanDeviceConfig } from './dtos/FanDeviceConfig.js';
+import type { FanRotationEndpointInterface } from './dtos/FanRotationEndpointInterface.js';
 import { DeviceIntegrationApiFanResetGateway } from './fan/infrastructures/DeviceIntegrationApiFanResetGateway.js';
+import { DeviceIntegrationApiFanRotationGateway } from './fan/infrastructures/DeviceIntegrationApiFanRotationGateway.js';
 import type { FanResetServiceInterface } from './fan/services/FanResetServiceInterface.js';
+import type { FanRotationServiceInterface } from './fan/services/FanRotationServiceInterface.js';
 import { FanResetService } from './fan/services/FanResetService.js';
+import { FanRotationService } from './fan/services/FanRotationService.js';
 import { ApiClient } from './infrastructure/apis/ApiClient.js';
 import type { SimpleIrFanPlatform } from './platform.js';
 import { FanService } from './services/FanService.js';
@@ -14,19 +18,28 @@ type FanResetEndpointConfig = {
   method: 'POST';
 };
 
+type FanRotationEndpointConfig = FanRotationEndpointInterface;
+
 const RESET_SERVICE_SUBTYPE = 'fan-reset';
+const ROTATION_SERVICE_SUBTYPE = 'fan-rotation-toggle';
 const RESET_OFFLINE_ERROR_MESSAGE = 'Fan reset failed for configured endpoint';
+const ROTATION_OFFLINE_ERROR_MESSAGE = 'Fan rotation failed for configured endpoint';
 const RESET_LOG_PREFIX = 'Fan reset';
+const ROTATION_LOG_PREFIX = 'Fan rotation';
 
 export class SimpleIrFanAccessory {
   private readonly service: Service;
   private readonly fanService: FanService;
   private readonly fanDevice: FanDevice;
   private readonly fanResetService?: FanResetServiceInterface;
+  private readonly fanRotationService?: FanRotationServiceInterface;
   private readonly resetSwitchService?: Service;
+  private readonly rotationSwitchService?: Service;
   private readonly accessoryName: string;
   private readonly fanNameContext: string;
+  private readonly actionTimeoutMs: number;
   private resetActionPromise?: Promise<void>;
+  private rotationActionPromise?: Promise<void>;
 
   constructor(
     private readonly platform: SimpleIrFanPlatform,
@@ -42,6 +55,7 @@ export class SimpleIrFanAccessory {
     };
     this.fanService = new FanService(new ApiClient(safeLog as Logger));
     this.fanDevice = new FanDevice(device);
+    this.actionTimeoutMs = device.timeoutMs ?? 5_000;
     this.accessoryName = device.name;
     this.fanNameContext = `${device.name} (${device.serialNumber})`;
 
@@ -61,12 +75,12 @@ export class SimpleIrFanAccessory {
       .onGet(this.handleGetRotationSpeed.bind(this))
       .onSet(this.handleSetRotationSpeed.bind(this));
 
-    this.service.getCharacteristic(api.hap.Characteristic.SwingMode)
-      .onGet(this.handleGetSwingMode.bind(this))
-      .onSet(this.handleSetSwingMode.bind(this));
+    this.removeSwingModeCharacteristic();
 
-    this.fanResetService = this.createFanResetService(device.endpoints as { reset?: FanResetEndpointConfig }, device.timeoutMs ?? 5_000);
+    this.fanResetService = this.createFanResetService(device.endpoints, this.actionTimeoutMs);
     this.resetSwitchService = this.configureResetService();
+    this.fanRotationService = this.createFanRotationService(device.endpoints, this.actionTimeoutMs);
+    this.rotationSwitchService = this.configureRotationService();
 
     this.fanService.refresh(this.fanDevice).catch(() => {});
   }
@@ -75,7 +89,6 @@ export class SimpleIrFanAccessory {
     const { api } = this.platform;
     this.service.updateCharacteristic(api.hap.Characteristic.Active, this.fanDevice.on ? 1 : 0);
     this.service.updateCharacteristic(api.hap.Characteristic.RotationSpeed, this.fanDevice.speed);
-    this.service.updateCharacteristic(api.hap.Characteristic.SwingMode, this.fanDevice.rotation ? 1 : 0);
   }
 
   private async handleGetOn(): Promise<CharacteristicValue> {
@@ -86,20 +99,12 @@ export class SimpleIrFanAccessory {
     return await this.fanService.getSpeed(this.fanDevice).finally(() => this.pushStateToHomeKit());
   }
 
-  private async handleGetSwingMode(): Promise<CharacteristicValue> {
-    return await this.fanService.isRotating(this.fanDevice).finally(() => this.pushStateToHomeKit()) ? 1 : 0;
-  }
-
   private async handleSetOn(value: CharacteristicValue): Promise<void> {
     await this.fanService.toggle(this.fanDevice, value === 1).finally(() => this.pushStateToHomeKit());
   }
 
   private async handleSetRotationSpeed(value: CharacteristicValue): Promise<void> {
     await this.fanService.setSpeed(this.fanDevice, value as number).finally(() => this.pushStateToHomeKit());
-  }
-
-  private async handleSetSwingMode(value: CharacteristicValue): Promise<void> {
-    await this.fanService.toggleRotate(this.fanDevice, value === 1).finally(() => this.pushStateToHomeKit());
   }
 
   private createFanResetService(
@@ -128,10 +133,36 @@ export class SimpleIrFanAccessory {
     }
   }
 
+  private createFanRotationService(
+    endpoints: { rotate?: FanRotationEndpointConfig },
+    timeoutMs: number,
+  ): FanRotationServiceInterface | undefined {
+    const rotationEndpoint = endpoints.rotate;
+    if (!rotationEndpoint) {
+      this.removeCachedRotationSwitch();
+      return undefined;
+    }
+
+    if (!this.isValidRotationMethod(rotationEndpoint.method)) {
+      this.logRotationConfigError('Invalid rotation method.');
+      this.removeCachedRotationSwitch();
+      return undefined;
+    }
+
+    try {
+      const gateway = new DeviceIntegrationApiFanRotationGateway(rotationEndpoint.uri, { timeoutMs });
+      return new FanRotationService(gateway);
+    } catch (_error) {
+      this.logRotationConfigError('Invalid rotation configuration.');
+      this.removeCachedRotationSwitch();
+      return undefined;
+    }
+  }
+
   private configureResetService(): Service | undefined {
     const { api, log } = this.platform;
     const hasValidResetService = Boolean(this.fanResetService);
-    const cachedService = this.getResetSwitchService();
+    const cachedService = this.getSwitchService(RESET_SERVICE_SUBTYPE);
 
     if (!hasValidResetService) {
       if (cachedService) {
@@ -152,6 +183,30 @@ export class SimpleIrFanAccessory {
     return service;
   }
 
+  private configureRotationService(): Service | undefined {
+    const { api, log } = this.platform;
+    const hasValidRotationService = Boolean(this.fanRotationService);
+    const cachedService = this.getSwitchService(ROTATION_SERVICE_SUBTYPE);
+
+    if (!hasValidRotationService) {
+      if (cachedService) {
+        log.info(`${ROTATION_LOG_PREFIX} disabled for ${this.fanNameContext}.`);
+        this.accessory.removeService(cachedService);
+      }
+      return undefined;
+    }
+
+    const service = cachedService
+      || this.accessory.addService(api.hap.Service.Switch, 'Rotation Toggle', ROTATION_SERVICE_SUBTYPE);
+    service.setCharacteristic(api.hap.Characteristic.Name, `${this.accessoryName} Rotation Toggle`);
+    this.setRotationCharacteristic(service, false);
+    service.getCharacteristic(api.hap.Characteristic.On)
+      .onSet(this.handleSetRotationOn.bind(this))
+      .onGet(this.handleGetRotationOn.bind(this));
+
+    return service;
+  }
+
   private async handleSetResetOn(value: CharacteristicValue): Promise<void> {
     const { hap } = this.platform.api;
     const shouldReset = value === true || value === 1;
@@ -168,7 +223,28 @@ export class SimpleIrFanAccessory {
 
     try {
       await this.startResetAction();
-    } catch (error) {
+    } catch {
+      throw new hap.HapStatusError(hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    }
+  }
+
+  private async handleSetRotationOn(value: CharacteristicValue): Promise<void> {
+    const { hap } = this.platform.api;
+    const shouldRotate = value === true || value === 1;
+
+    if (!shouldRotate) {
+      this.setRotationCharacteristic(this.rotationSwitchService, false);
+      return;
+    }
+
+    if (!this.fanRotationService || !this.rotationSwitchService) {
+      this.setRotationCharacteristic(this.rotationSwitchService, false);
+      return;
+    }
+
+    try {
+      await this.startRotationAction();
+    } catch {
       throw new hap.HapStatusError(hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
     }
   }
@@ -194,8 +270,38 @@ export class SimpleIrFanAccessory {
     return this.resetActionPromise;
   }
 
+  private startRotationAction(): Promise<void> {
+    if (!this.rotationActionPromise) {
+      const { log } = this.platform;
+      this.setRotationCharacteristic(this.rotationSwitchService, true);
+      this.rotationActionPromise = this.fanRotationService!
+        .rotate()
+        .then(() => {
+          log.info(`${ROTATION_LOG_PREFIX} completed for ${this.fanNameContext}.`);
+        })
+        .catch((error) => {
+          log.error(ROTATION_OFFLINE_ERROR_MESSAGE, this.fanNameContext, error);
+          throw error;
+        })
+        .finally(() => {
+          this.setRotationCharacteristic(this.rotationSwitchService, false);
+          this.rotationActionPromise = undefined;
+        });
+    }
+    return this.rotationActionPromise;
+  }
+
   private async handleGetResetOn(): Promise<CharacteristicValue> {
     const service = this.resetSwitchService;
+    if (!service) {
+      return false;
+    }
+
+    return service.getCharacteristic(this.platform.api.hap.Characteristic.On).value as boolean;
+  }
+
+  private async handleGetRotationOn(): Promise<CharacteristicValue> {
+    const service = this.rotationSwitchService;
     if (!service) {
       return false;
     }
@@ -207,22 +313,38 @@ export class SimpleIrFanAccessory {
     service?.getCharacteristic(this.platform.api.hap.Characteristic.On).updateValue(value);
   }
 
+  private setRotationCharacteristic(service: Service | undefined, value: boolean): void {
+    service?.getCharacteristic(this.platform.api.hap.Characteristic.On).updateValue(value);
+  }
+
   private removeCachedResetSwitch(): void {
-    const existing = this.getResetSwitchService();
+    const existing = this.getSwitchService(RESET_SERVICE_SUBTYPE);
     if (existing) {
       this.accessory.removeService(existing);
     }
   }
 
-  private getResetSwitchService(): Service | undefined {
+  private removeCachedRotationSwitch(): void {
+    const existing = this.getSwitchService(ROTATION_SERVICE_SUBTYPE);
+    if (existing) {
+      this.accessory.removeService(existing);
+    }
+  }
+
+  private getSwitchService(subtype: string): Service | undefined {
     const services = (this.accessory as { services?: unknown }).services;
 
     if (Array.isArray(services)) {
-      return services.find((service: { subtype?: string }) => service.subtype === RESET_SERVICE_SUBTYPE) as Service | undefined;
+      return services.find((service: { subtype?: string }) => service.subtype === subtype) as Service | undefined;
     }
 
     if (services instanceof Map) {
-      return services.get(this.platform.api.hap.Service.Switch) as Service | undefined;
+      for (const service of services.values() as Iterable<Service & { subtype?: string }>) {
+        if (service.subtype === subtype) {
+          return service;
+        }
+      }
+      return undefined;
     }
 
     return this.accessory.getService(this.platform.api.hap.Service.Switch);
@@ -232,7 +354,28 @@ export class SimpleIrFanAccessory {
     return method === 'POST';
   }
 
+  private isValidRotationMethod(method: string): method is 'POST' {
+    return method === 'POST';
+  }
+
   private logResetConfigError(message: string): void {
     this.platform.log.error(`${RESET_LOG_PREFIX} unavailable for ${this.fanNameContext}.`, message);
+  }
+
+  private logRotationConfigError(message: string): void {
+    this.platform.log.error(`${ROTATION_LOG_PREFIX} unavailable for ${this.fanNameContext}.`, message);
+  }
+
+  private removeSwingModeCharacteristic(): void {
+    const service = this.service as Service & {
+      getCharacteristic?: (characteristic: unknown) => { value?: unknown } | undefined;
+      removeCharacteristic?: (characteristic: unknown) => void;
+    };
+    const removeCharacteristic = service.removeCharacteristic;
+    const swingModeCharacteristic = service.getCharacteristic?.(this.platform.api.hap.Characteristic.SwingMode);
+
+    if (typeof removeCharacteristic === 'function' && swingModeCharacteristic) {
+      removeCharacteristic.call(this.service, swingModeCharacteristic);
+    }
   }
 }

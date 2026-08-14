@@ -25,10 +25,6 @@ export class FanService {
     if (typeof status.speed === 'number') {
       fanDevice.setDeviceSpeed(status.speed);
     }
-
-    if (typeof status.isRotating === 'boolean') {
-      fanDevice.rotation = status.isRotating;
-    }
   }
 
   public async isOn(fanDevice: FanDevice): Promise<boolean> {
@@ -39,11 +35,6 @@ export class FanService {
   public async getSpeed(fanDevice: FanDevice): Promise<number> {
     this.refresh(fanDevice).catch(() => {});
     return fanDevice?.speed ?? 0;
-  }
-
-  public async isRotating(fanDevice: FanDevice): Promise<boolean> {
-    await this.refresh(fanDevice).catch(() => {});
-    return fanDevice.rotation;
   }
 
   public async toggle(fanDevice: FanDevice, active: boolean) {
@@ -72,18 +63,5 @@ export class FanService {
       auth: fanDevice.config.auth,
       variables: { speed },
     });
-  }
-
-  public async toggleRotate(fanDevice: FanDevice, on: boolean) {
-    const ep = on ? fanDevice.config.endpoints.startRotation : fanDevice.config.endpoints.stopRotation;
-    if (!ep || !fanDevice.on) {
-      return;
-    }
-    await this.apiClient.call({
-      endpoint: ep,
-      timeoutMs: fanDevice.config.timeoutMs ?? 5000,
-      auth: fanDevice.config.auth,
-    });
-    fanDevice.rotation = on;
   }
 }

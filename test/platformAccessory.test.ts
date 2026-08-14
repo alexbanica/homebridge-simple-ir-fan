@@ -57,6 +57,15 @@ class FakeService {
     }
     return characteristic;
   }
+
+  removeCharacteristic(characteristic: FakeCharacteristic) {
+    for (const [type, current] of this.characteristics) {
+      if (current === characteristic) {
+        this.characteristics.delete(type);
+      }
+    }
+    return this;
+  }
 }
 
 class FakeAccessory {
@@ -86,6 +95,7 @@ function fixture(
   reset?: { uri: string; method: 'POST' },
   timeoutMs?: number,
   identity: { name?: string; serialNumber?: string } = {},
+  rotate?: { uri: string; method: 'POST' },
 ) {
   const logs = { info: [] as unknown[][], error: [] as unknown[][] };
   const api = {
@@ -112,15 +122,30 @@ function fixture(
   const device = {
     name: identity.name ?? accessory.displayName, manufacturer: 'Generic', model: 'IR Fan',
     serialNumber: identity.serialNumber ?? 'FAN-001', timeoutMs,
-    endpoints: { getStatus: { uri: 'http://fan.example.test/state', method: 'GET' as const }, ...(reset ? { reset } : {}) },
+    endpoints: {
+      getStatus: { uri: 'http://fan.example.test/state', method: 'GET' as const },
+      ...(reset ? { reset } : {}),
+      ...(rotate ? { rotate } : {}),
+    },
   };
   new SimpleIrFanAccessory(platform, accessory as unknown as PlatformAccessory, device);
-  return { accessory, api, logs, resetService: accessory.services.find((service) => service.type === 'Switch') };
+  return {
+    accessory,
+    api,
+    logs,
+    resetService: accessory.services.find((service) => service.type === 'Switch' && service.subtype === 'fan-reset'),
+    rotationService: accessory.services.find((service) => service.type === 'Switch' && service.subtype === 'fan-rotation-toggle'),
+  };
 }
 
 function resetCharacteristic(view: ReturnType<typeof fixture>) {
   assert.ok(view.resetService, 'expected a reset Switch service');
   return view.resetService.getCharacteristic(view.api.hap.Characteristic.On);
+}
+
+function rotationCharacteristic(view: ReturnType<typeof fixture>) {
+  assert.ok(view.rotationService, 'expected a rotation Switch service');
+  return view.rotationService.getCharacteristic(view.api.hap.Characteristic.On);
 }
 
 test('fan without reset endpoint has no reset Switch and retains Fanv2', () => {
@@ -332,4 +357,261 @@ test('invalid reset configuration removes reset Switch, preserves Fanv2, and doe
   assert.equal(JSON.stringify(view.logs.error).includes('super-secret'), false);
   assert.equal(JSON.stringify(view.logs.error).includes('example.test'), false);
   assert.equal(JSON.stringify(view.logs.error).includes('FAN-001'), true);
+});
+
+test('configured rotation is one stable-subtype Switch on the existing fan and has no active SwingMode control', () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_input, init) => {
+    if (init?.method === 'POST') {
+      return new Response('{}', { status: 202 });
+    }
+    return new Response(JSON.stringify({ isOn: false, speed: 0, isRotating: false }), { status: 200 });
+  };
+  try {
+    const first = fixture(undefined, undefined, {}, {
+      uri: 'http://fan.example.test/api/v1/fan/rotate', method: 'POST',
+    });
+    assert.ok(first.rotationService);
+    assert.equal(first.rotationService.subtype, 'fan-rotation-toggle');
+    assert.equal(first.accessory.services.filter((service) => service.type === 'Switch').length, 1);
+    assert.equal(first.accessory.services.filter((service) => service.type === 'Fanv2').length, 1);
+    const second = fixture(undefined, undefined, {}, {
+      uri: 'https://fan.example.test/api/v1/fan/rotate', method: 'POST',
+    });
+    assert.equal(second.rotationService?.subtype, first.rotationService.subtype);
+    const fan = first.accessory.services.find((service) => service.type === 'Fanv2');
+    assert.ok(fan);
+    assert.equal(fan.characteristics.has(first.api.hap.Characteristic.SwingMode), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('cached fan SwingMode characteristic instance is removed when rotation is configured', () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_input, init) => {
+    if (init?.method === 'POST') {
+      return new Response('{}', { status: 202 });
+    }
+    return new Response(JSON.stringify({ isOn: false, speed: 0, isRotating: false }), { status: 200 });
+  };
+  try {
+    const view = fixture(undefined, undefined, {}, {
+      uri: 'http://fan.example.test/api/v1/fan/rotate', method: 'POST',
+    });
+    const fan = view.accessory.services.find((service) => service.type === 'Fanv2');
+    assert.ok(fan);
+    const swingModeCharacteristic = fan.getCharacteristic(view.api.hap.Characteristic.SwingMode);
+    swingModeCharacteristic.updateValue(1);
+    assert.equal(fan.characteristics.has(view.api.hap.Characteristic.SwingMode), true);
+
+    new SimpleIrFanAccessory({ api: view.api, log: view.logs } as never, view.accessory as never, {
+      name: view.accessory.displayName,
+      manufacturer: 'Generic',
+      model: 'IR Fan',
+      serialNumber: 'FAN-001',
+      endpoints: {
+        getStatus: { uri: 'http://fan.example.test/state', method: 'GET' },
+        rotate: { uri: 'http://fan.example.test/api/v1/fan/rotate', method: 'POST' },
+      },
+    });
+
+    assert.equal(fan.characteristics.has(view.api.hap.Characteristic.SwingMode), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('rotation-only accessories refresh fan state on startup', async () => {
+  const originalFetch = globalThis.fetch;
+  const requests: Array<{ input: string; init?: RequestInit }> = [];
+  globalThis.fetch = async (input, init) => {
+    requests.push({ input: String(input), init });
+    return new Response(JSON.stringify({ isOn: false, speed: 0, isRotating: false }), { status: 200 });
+  };
+  try {
+    fixture(undefined, undefined, {}, {
+      uri: 'http://fan.example.test/api/v1/fan/rotate', method: 'POST',
+    });
+    await Promise.resolve();
+    assert.equal(requests[0]?.input, 'http://fan.example.test/state');
+    assert.equal(requests[0]?.init?.method, 'GET');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('rotation Switch is momentary, bodyless, pending ON, and successful 202 returns it OFF', async () => {
+  const originalFetch = globalThis.fetch;
+  let resolveRequest!: (response: Response) => void;
+  const requests: Array<{ input: string; init?: RequestInit }> = [];
+  globalThis.fetch = (input, init) => {
+    if (init?.method === 'POST') {
+      requests.push({ input: String(input), init });
+      return new Promise<Response>((resolve) => {
+        resolveRequest = resolve;
+      });
+    }
+    return Promise.resolve(new Response(JSON.stringify({ isOn: false, speed: 0, isRotating: false }), { status: 200 }));
+  };
+  try {
+    const view = fixture(undefined, undefined, {}, {
+      uri: 'http://fan.example.test/api/v1/fan/rotate', method: 'POST',
+    });
+    const on = rotationCharacteristic(view);
+    await on.write(false);
+    assert.equal(requests.length, 0);
+    const write = on.write(true);
+    await Promise.resolve();
+    assert.equal(on.value, true);
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0]?.input, 'http://fan.example.test/api/v1/fan/rotate');
+    assert.equal(requests[0]?.init?.method, 'POST');
+    assert.equal(requests[0]?.init?.body, undefined);
+    resolveRequest(new Response('ignored response body', { status: 202 }));
+    await write;
+    assert.equal(on.value, false);
+    assert.equal(view.logs.info.length, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('rotation writes coalesce per fan, failures map to HAP, and a later write retries', async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  let resolveRequest!: (response: Response) => void;
+  globalThis.fetch = (_input, init) => {
+    if (init?.method !== 'POST') {
+      return Promise.resolve(new Response(JSON.stringify({ isOn: false, speed: 0, isRotating: false }), { status: 200 }));
+    }
+    calls += 1;
+    if (calls === 1) {
+      return new Promise<Response>((resolve) => {
+        resolveRequest = resolve;
+      });
+    }
+    return Promise.resolve(new Response('{}', { status: 202 }));
+  };
+  try {
+    const view = fixture(undefined, undefined, {}, {
+      uri: 'http://fan.example.test/api/v1/fan/rotate', method: 'POST',
+    });
+    const on = rotationCharacteristic(view);
+    const first = on.write(true);
+    const second = on.write(true);
+    await Promise.resolve();
+    assert.equal(calls, 1);
+    resolveRequest(new Response('{}', { status: 500 }));
+    await Promise.all([
+      assert.rejects(first, (error: { hapStatus?: number }) => error.hapStatus === -70402),
+      assert.rejects(second, (error: { hapStatus?: number }) => error.hapStatus === -70402),
+    ]);
+    assert.equal(on.value, false);
+    assert.equal(view.logs.error.length, 1);
+    await on.write(true);
+    assert.equal(calls, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('rotation and reset remain independent on one fan, and cached rotation service is reconciled', async () => {
+  const originalFetch = globalThis.fetch;
+  const pending = new Map<string, (response: Response) => void>();
+  globalThis.fetch = (input, init) => {
+    const url = String(input);
+    if (init?.method !== 'POST') {
+      return Promise.resolve(new Response(JSON.stringify({ isOn: false, speed: 0, isRotating: false }), { status: 200 }));
+    }
+    return new Promise<Response>((resolve) => pending.set(url, resolve));
+  };
+  try {
+    const view = fixture({ uri: 'http://fan.example.test/api/v1/fan/reset', method: 'POST' }, undefined, {}, {
+      uri: 'http://fan.example.test/api/v1/fan/rotate', method: 'POST',
+    });
+    assert.equal(view.accessory.services.filter((service) => service.type === 'Switch').length, 2);
+    assert.equal(view.resetService?.subtype, 'fan-reset');
+    assert.equal(view.rotationService?.subtype, 'fan-rotation-toggle');
+
+    const resetWrite = resetCharacteristic(view).write(true);
+    const rotationWrite = rotationCharacteristic(view).write(true);
+    await Promise.resolve();
+    assert.equal(resetCharacteristic(view).value, true);
+    assert.equal(rotationCharacteristic(view).value, true);
+    pending.get('http://fan.example.test/api/v1/fan/reset')?.(new Response('{}', { status: 202 }));
+    pending.get('http://fan.example.test/api/v1/fan/rotate')?.(new Response('{}', { status: 202 }));
+    await Promise.all([resetWrite, rotationWrite]);
+
+    new SimpleIrFanAccessory({ api: view.api, log: view.logs } as never, view.accessory as never, {
+      name: view.accessory.displayName, manufacturer: 'Generic', model: 'IR Fan', serialNumber: 'FAN-001',
+      endpoints: {
+        getStatus: { uri: 'http://fan.example.test/state', method: 'GET' },
+        reset: { uri: 'http://fan.example.test/api/v1/fan/reset', method: 'POST' },
+      },
+    });
+    assert.equal(view.accessory.services.some((service) => service.subtype === 'fan-rotation-toggle'), false);
+    assert.equal(view.accessory.services.some((service) => service.subtype === 'fan-reset'), true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('rotation timeout uses configured value and defaults to five seconds', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalSetTimeout = globalThis.setTimeout;
+  const delays: number[] = [];
+  globalThis.setTimeout = ((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
+    if (typeof timeout === 'number') {
+      delays.push(timeout);
+    }
+    return originalSetTimeout(handler, timeout, ...args);
+  }) as typeof setTimeout;
+  globalThis.fetch = async () => new Response('{}', { status: 202 });
+  try {
+    await rotationCharacteristic(fixture(undefined, 1234, {}, {
+      uri: 'http://custom.example.test/api/v1/fan/rotate', method: 'POST',
+    })).write(true);
+    await rotationCharacteristic(fixture(undefined, undefined, {}, {
+      uri: 'http://default.example.test/api/v1/fan/rotate', method: 'POST',
+    })).write(true);
+    assert.deepEqual(delays, [1234, 1234, 5000, 5000]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    globalThis.setTimeout = originalSetTimeout;
+  }
+});
+
+test('different fans rotation writes remain independent', async () => {
+  const originalFetch = globalThis.fetch;
+  const pending = new Map<string, (response: Response) => void>();
+  const rotationPosts: string[] = [];
+  globalThis.fetch = (input, init) => {
+    const url = String(input);
+    if (init?.method !== 'POST') {
+      return Promise.resolve(new Response(JSON.stringify({ isOn: false, speed: 0, isRotating: false }), { status: 200 }));
+    }
+    rotationPosts.push(url);
+    return new Promise<Response>((resolve) => pending.set(url, resolve));
+  };
+  try {
+    const first = fixture(undefined, undefined, { serialNumber: 'FAN-001' }, {
+      uri: 'http://first.example.test/api/v1/fan/rotate', method: 'POST',
+    });
+    const second = fixture(undefined, undefined, { serialNumber: 'FAN-002' }, {
+      uri: 'http://second.example.test/api/v1/fan/rotate', method: 'POST',
+    });
+    const firstWrite = rotationCharacteristic(first).write(true);
+    const secondWrite = rotationCharacteristic(second).write(true);
+    await Promise.resolve();
+    assert.deepEqual(rotationPosts.sort(), [
+      'http://first.example.test/api/v1/fan/rotate',
+      'http://second.example.test/api/v1/fan/rotate',
+    ]);
+    pending.get('http://first.example.test/api/v1/fan/rotate')?.(new Response('{}', { status: 202 }));
+    pending.get('http://second.example.test/api/v1/fan/rotate')?.(new Response('{}', { status: 202 }));
+    await Promise.all([firstWrite, secondWrite]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
