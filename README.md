@@ -28,11 +28,72 @@ npm run build
 
 For local Homebridge development, link the package with `npm link` and use `npm run watch`.
 
+## Release publishing
+
+Releases use exact tags in the form `MAJOR.MINOR.PATCH` for stable versions or
+`MAJOR.MINOR.PATCH-betaN` for beta versions. The Git tag is also the published
+npm package version. Stable releases use the npm `latest` dist-tag; beta
+releases use the `beta` dist-tag.
+
+Use the release command from a tagged checkout:
+
+```shell
+RELEASE_TAG=1.2.3 NODE_AUTH_TOKEN=<forgejo-package-token> npm run publish:forgejo
+```
+
+That command publishes `@alexlab/homebridge-simple-ir-fan` to the fixed Forgejo registry
+at `https://forgejo.alexlab.nl/api/packages/public/npm/`.
+
+Release publishing requires both environment variables:
+
+- `RELEASE_TAG`: the exact tag to release, in `MAJOR.MINOR.PATCH` or
+  `MAJOR.MINOR.PATCH-betaN` form.
+- `NODE_AUTH_TOKEN`: the Forgejo package token used only for the publish step.
+
+The package is readable from the public registry, but writing requires an
+authorized maintainer or service account that is a member of the Forgejo
+`public` organization and has `write:package` access with the `Public only`
+restriction.
+
+Store that token in GitHub as the Actions secret `FORGEJO_PACKAGE_TOKEN`.
+The GitHub release workflow should accept only trusted pushed numeric release tags, and
+the repository should use a tag ruleset or equivalent policy so only trusted
+maintainers can create or update those tags.
+
+The Forgejo server must present the full trusted TLS certificate chain. Do not
+use `curl -k`, `NODE_TLS_REJECT_UNAUTHORIZED=0`, `npm config set strict-ssl
+false`, or any equivalent bypass.
+
+Publishing the same package name and version twice is immutable: a duplicate
+publish must fail instead of overwriting the existing version.
+
+The GitHub release workflow uses the hosted `ubuntu-slim` runner. It provides
+a minimal preinstalled tool set, does not require Docker or privileged
+operations for this publish job, and enforces a 15-minute job limit.
+`ubuntu-slim` still needs normal DNS and outbound TCP 443 access to Forgejo
+and npm dependency sources. A self-hosted runner needs the same connectivity.
+
+The first tag creation, first publish, and first install or verification of the
+published package are operator-owned actions. Until that round trip succeeds,
+release documentation and release workflow behavior should be treated as DRAFT.
+
+Exact-version install example:
+
+```shell
+npm install @alexlab/homebridge-simple-ir-fan@1.2.3 --registry https://forgejo.alexlab.nl/api/packages/public/npm/
+```
+
+Beta install example:
+
+```shell
+npm install @alexlab/homebridge-simple-ir-fan@beta --registry https://forgejo.alexlab.nl/api/packages/public/npm/
+```
+
 ## Configuration
 
 The public identifiers are:
 
-- Plugin: `homebridge-simple-ir-fan`
+- Plugin: `@alexlab/homebridge-simple-ir-fan`
 - Platform: `SimpleIrFan`
 
 See [`config.schema.json`](./config.schema.json) for the Homebridge UI contract and [`config.example.json`](./config.example.json) for a complete example.

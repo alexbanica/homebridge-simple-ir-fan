@@ -1,9 +1,8 @@
 {
-  "name": "homebridge-simple-ir-fan",
+  "name": "@alexlab/homebridge-simple-ir-fan",
   "displayName": "SimpleIrFan",
   "type": "module",
   "version": "1.0.0",
-  "private": true,
   "description": "Allows you to control a fan via HTTP API endpoints configured per action.",
   "author": "Ionut Alexandru Banica",
   "license": "Apache-2.0",
@@ -23,6 +22,16 @@
     "http"
   ],
   "main": "dist/index.js",
+  "files": [
+    "dist/",
+    "config.schema.json",
+    "README.md",
+    "LICENSE*"
+  ],
+  "publishConfig": {
+    "registry": "https://forgejo.alexlab.nl/api/packages/public/npm/",
+    "access": "public"
+  },
   "engines": {
     "node": "^20.18.0 || ^22.10.0 || ^24.0.0",
     "homebridge": "^1.8.0 || ^2.0.0-beta.0"
@@ -31,7 +40,8 @@
     "build": "rimraf ./dist && tsc",
     "prepare": "npm run build",
     "lint": "eslint . --max-warnings=0",
-    "test": "rimraf ./.test-dist && tsc -p tsconfig.test.json && node --test .test-dist/test/*.test.js",
+    "publish:forgejo": "node ./scripts/publish-forgejo.mjs",
+    "test": "rimraf ./.test-dist && tsc -p tsconfig.test.json && node --test --test-concurrency=1 .test-dist/test/*.test.js --test-reporter=spec --test-isolation=none",
     "prepublishOnly": "npm run lint && npm run build",
     "watch": "npm run build && npm link && nodemon"
   },
