@@ -28,6 +28,58 @@ npm run build
 
 For local Homebridge development, link the package with `npm link` and use `npm run watch`.
 
+## Release publishing
+
+Stable releases use exact semantic tags of the form `vMAJOR.MINOR.PATCH`.
+The published npm version is the same value without the leading `v`, so
+`v1.2.3` becomes package version `1.2.3`.
+
+Use the release command from a tagged checkout:
+
+```shell
+RELEASE_TAG=v1.2.3 NODE_AUTH_TOKEN=<forgejo-package-token> npm run publish:forgejo
+```
+
+That command publishes `homebridge-simple-ir-fan` to the fixed Forgejo registry
+at `https://forgejo.alexlab.nl/api/packages/public/npm/`.
+
+Release publishing requires both environment variables:
+
+- `RELEASE_TAG`: the exact stable tag to release, in `vMAJOR.MINOR.PATCH`
+  form.
+- `NODE_AUTH_TOKEN`: the Forgejo package token used only for the publish step.
+
+The package is readable from the public registry, but writing requires an
+authorized maintainer or service account that is a member of the Forgejo
+`public` organization and has `write:package` access with the `Public only`
+restriction.
+
+Store that token in GitHub as the Actions secret `FORGEJO_PACKAGE_TOKEN`.
+The GitHub release workflow should accept only trusted pushed `v*` tags, and
+the repository should use a tag ruleset or equivalent policy so only trusted
+maintainers can create or update those tags.
+
+The Forgejo server must present the full trusted TLS certificate chain. Do not
+use `curl -k`, `NODE_TLS_REJECT_UNAUTHORIZED=0`, `npm config set strict-ssl
+false`, or any equivalent bypass.
+
+Publishing the same package name and version twice is immutable: a duplicate
+publish must fail instead of overwriting the existing version.
+
+GitHub-hosted `ubuntu-latest` runners only need normal DNS and outbound TCP 443
+access to Forgejo and npm dependency sources. A self-hosted runner needs the
+same connectivity.
+
+The first tag creation, first publish, and first install or verification of the
+published package are operator-owned actions. Until that round trip succeeds,
+release documentation and release workflow behavior should be treated as DRAFT.
+
+Exact-version install example:
+
+```shell
+npm install homebridge-simple-ir-fan@1.2.3 --registry https://forgejo.alexlab.nl/api/packages/public/npm/
+```
+
 ## Configuration
 
 The public identifiers are:
