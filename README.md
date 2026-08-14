@@ -66,9 +66,11 @@ false`, or any equivalent bypass.
 Publishing the same package name and version twice is immutable: a duplicate
 publish must fail instead of overwriting the existing version.
 
-GitHub-hosted `ubuntu-latest` runners only need normal DNS and outbound TCP 443
-access to Forgejo and npm dependency sources. A self-hosted runner needs the
-same connectivity.
+The GitHub release workflow uses the hosted `ubuntu-slim` runner. It provides
+a minimal preinstalled tool set, does not require Docker or privileged
+operations for this publish job, and enforces a 15-minute job limit.
+`ubuntu-slim` still needs normal DNS and outbound TCP 443 access to Forgejo
+and npm dependency sources. A self-hosted runner needs the same connectivity.
 
 The first tag creation, first publish, and first install or verification of the
 published package are operator-owned actions. Until that round trip succeeds,

@@ -3,6 +3,18 @@
 Status: Approved
 Date: 2026-08-14
 
+## Iteration - Cost-Efficient GitHub Runner
+
+Requested on 2026-08-14:
+
+- Replace the release job's `ubuntu-latest` runner with GitHub's
+  single-CPU `ubuntu-slim` runner.
+- Preserve every other approved release, security, validation, packaging,
+  documentation, delivery, and DRAFT-acceptance behavior.
+- Require the lightweight release job to complete within `ubuntu-slim`'s
+  15-minute job limit without Docker, privileged operations, or persistent
+  runner customization.
+
 ## Purpose
 
 Publish deterministic, installable npm packages for
@@ -153,8 +165,14 @@ Out of scope:
   verification bypass.
 - A self-hosted runner additionally requires DNS resolution and outbound TCP
   443 access to `forgejo.alexlab.nl` and the dependency sources used by npm.
-- A GitHub-hosted `ubuntu-latest` runner requires no persistent runner
-  customization after the public certificate chain is corrected.
+- The release job uses GitHub-hosted `ubuntu-slim`, which provides one x64 CPU,
+  5 GB RAM, 14 GB storage, a minimal preinstalled tool set, and a 15-minute job
+  limit.
+- The job must rely only on checkout, setup-node, Node/npm, standard network
+  access, and ordinary workspace files. It must not require Docker, privileged
+  operations, kernel features, or persistent runner customization.
+- The corrected public certificate chain must remain sufficient for standard
+  TLS verification from the ephemeral `ubuntu-slim` container.
 
 ## Deterministic Behavior
 
@@ -187,8 +205,9 @@ Out of scope:
 3. The publish job checks out the exact tagged commit and receives the short
    GitHub tag name through `RELEASE_TAG`. GitHub's `GITHUB_REF_NAME` or
    equivalent `github.ref_name` value is the source.
-4. The release job uses Node 24, which is inside the package's declared engine
-   range, and performs a clean lockfile-based dependency install.
+4. The release job runs on `ubuntu-slim`, uses Node 24, which is inside the
+   package's declared engine range, and performs a clean lockfile-based
+   dependency install.
 5. Release validation and packaging run in a clean job that does not run or
    inherit the existing dependency-mutating `npm audit fix` step.
 6. Publishing starts only after all release validation succeeds.
@@ -237,6 +256,9 @@ trust after the server chain is corrected.
   plugin identifier.
 - `latest` is the intended dist-tag for every accepted release.
 - GitHub Actions, rather than Forgejo Actions, performs the release.
+- `ubuntu-slim` has sufficient CPU, memory, storage, installed tooling, and
+  execution time for the release job's clean install, tests, lint, build,
+  package inspection, publish, and verification sequence.
 - Static token authentication is acceptable for the initial workflow; OIDC may
   be specified separately later.
 - Actual release-tag creation and the first production publish remain
@@ -255,6 +277,9 @@ trust after the server chain is corrected.
   visible technical debt but are not part of the isolated release job.
 - A malformed or duplicate tag can produce a failed workflow but cannot replace
   an existing package version.
+- The single-CPU runner may take longer than `ubuntu-latest`; a job exceeding
+  15 minutes fails safely before claiming successful publication and requires
+  an approved runner-policy iteration rather than an implicit runner fallback.
 
 ## Validation Plan
 
@@ -272,6 +297,9 @@ Deterministic repository validation:
   only from tag pushes.
 - Confirm the publish job has `contents: read`, uses a clean install, does not
   run `npm audit fix`, and scopes `FORGEJO_PACKAGE_TOKEN` to publishing.
+- Confirm the publish job uses exactly `ubuntu-slim`, requires no Docker or
+  privileged operations, and retains the deterministic workflow-contract
+  assertions for runner selection.
 - Run `git diff --check`.
 
 External preflight validation:
@@ -302,6 +330,8 @@ Operational acceptance:
   GitHub Actions secret without showing a real credential.
 - Document the TLS full-chain prerequisite and explicitly prohibit insecure
   workarounds.
+- Document that the release job uses the lightweight `ubuntu-slim` runner and
+  is constrained by its minimal tool set and 15-minute job limit.
 - Document duplicate-version behavior, first-release verification, and the
   DRAFT boundary when a live publish has not been performed.
 

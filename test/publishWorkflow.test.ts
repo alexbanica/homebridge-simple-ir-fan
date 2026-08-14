@@ -47,7 +47,13 @@ test('publish workflow is limited to pushed v* tags', () => {
 test('publish workflow uses read-only contents, serialized tags, and Node 24 clean install', () => {
   const source = workflow();
   const checkoutStep = stepBlock(source, 'Check out release tag');
+  const runnerLines = workflowLines(source).filter((line) => /^\s+runs-on:/.test(line));
 
+  assert.deepEqual(
+    runnerLines.map((line) => line.trim()),
+    ['runs-on: ubuntu-slim'],
+    'release workflow must use exactly the ubuntu-slim runner',
+  );
   assert.match(source, /permissions:\s*\n\s+contents:\s*read\b/);
   assert.match(source, /concurrency:\s*[\s\S]*group:\s*publish-forgejo-\$\{\{\s*github\.ref\s*\}\}[\s\S]*cancel-in-progress:\s*false/);
   assert.match(checkoutStep, /uses:\s*actions\/checkout@v4\b/);
