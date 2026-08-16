@@ -139,7 +139,7 @@ Each device supports optional authentication headers or a bearer token through i
 ### Rotation configuration migration
 
 - Replace `devices[].endpoints.startRotation` and `devices[].endpoints.stopRotation` with a single `devices[].endpoints.rotate` entry.
-- Remove any HomeKit `SwingMode` expectations from the fan accessory. Rotation is now exposed as a momentary `Switch`, not as a stateful HomeKit swing control.
+- Remove any HomeKit `SwingMode` expectations from the fan accessory. Rotation is exposed as a stateful `Switch` backed by the Device Integration API's `isRotating` status.
 - Add `rotate` under the same `devices[].endpoints` object as `reset`, not at the platform root or inside another nested object.
 
 ## Reset switch behavior
@@ -165,26 +165,28 @@ If configured, the reset endpoint applies only to API application state (`isOn=f
 
 When valid reset configuration is removed, no reset switch is exposed for that fan.
 
-## Rotation toggle behavior
+## Rotation switch behavior
 
-The platform exposes one stable momentary `Switch` service on the fan’s own accessory:
+The platform exposes one stable API-backed `Switch` service on the fan’s own accessory:
 
-- An ON write sends exactly one bodyless `POST` to the configured `devices[].endpoints.rotate.uri`.
+- Reads call the configured `devices[].endpoints.getStatus` endpoint and use its boolean `isRotating` field.
+- ON and OFF writes compare the requested state with the latest API status. When the states differ, the plugin sends exactly one bodyless `POST` to the configured `devices[].endpoints.rotate.uri`.
 - Only HTTP `202 Accepted` is considered successful.
 - The request times out after the fan’s configured `timeoutMs`, defaulting to `5000`.
 - No automatic retries are performed.
-- OFF writes do not contact the API.
-- The switch reports `ON` while the request is pending and returns to `OFF` after success or failure.
+- A write matching the reported API state does not send a toggle request.
+- After an accepted toggle, the switch reflects the requested state until a later API status read supplies a newer `isRotating` value.
+- If `getStatus` omits `isRotating`, the last known rotation state is preserved for backward compatibility.
 - Failures are logged and surfaced to HomeKit as `SERVICE_COMMUNICATION_FAILURE` without escaping the plugin boundary.
-- Concurrent ON writes on the same fan for rotation reuse one in-flight request.
-- ON writes on different fans are independent.
+- Concurrent rotation writes on the same fan reuse one in-flight request.
+- Rotation writes on different fans are independent.
 
 The rotation endpoint must match the full URI with method `POST` and path `/api/v1/fan/rotate`.
 It must use `http://` or `https://`, and it must not include a query string, fragment, or embedded credentials.
 
 Fan-level authentication configured on `devices[].auth` is not applied to rotation requests. Rotation calls are unauthenticated.
 
-If configured, the rotation endpoint means only that the Device Integration API accepted the toggle command. It does not claim the fan is now rotating, does not publish `isRotating`, and does not guarantee the final physical fan state.
+The switch reports the Device Integration API's state. Whether that state matches the physical fan depends on the API's own IR-state tracking.
 
 When valid rotation configuration is removed, no rotation toggle switch is exposed for that fan.
 

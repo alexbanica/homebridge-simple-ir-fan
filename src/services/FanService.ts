@@ -25,6 +25,9 @@ export class FanService {
     if (typeof status.speed === 'number') {
       fanDevice.setDeviceSpeed(status.speed);
     }
+    if (typeof status.isRotating === 'boolean') {
+      fanDevice.rotation = status.isRotating;
+    }
   }
 
   public async isOn(fanDevice: FanDevice): Promise<boolean> {
@@ -35,6 +38,11 @@ export class FanService {
   public async getSpeed(fanDevice: FanDevice): Promise<number> {
     this.refresh(fanDevice).catch(() => {});
     return fanDevice?.speed ?? 0;
+  }
+
+  public async getRotation(fanDevice: FanDevice): Promise<boolean> {
+    await this.refresh(fanDevice).catch(() => {});
+    return fanDevice?.rotation ?? false;
   }
 
   public async toggle(fanDevice: FanDevice, active: boolean) {

@@ -422,37 +422,64 @@ test('cached fan SwingMode characteristic instance is removed when rotation is c
   }
 });
 
-test('rotation-only accessories refresh fan state on startup', async () => {
+test('rotation-only accessories refresh API-backed rotation state on startup', async () => {
   const originalFetch = globalThis.fetch;
   const requests: Array<{ input: string; init?: RequestInit }> = [];
   globalThis.fetch = async (input, init) => {
     requests.push({ input: String(input), init });
-    return new Response(JSON.stringify({ isOn: false, speed: 0, isRotating: false }), { status: 200 });
+    return new Response(JSON.stringify({ isOn: false, speed: 0, isRotating: true }), { status: 200 });
   };
   try {
-    fixture(undefined, undefined, {}, {
+    const view = fixture(undefined, undefined, {}, {
       uri: 'http://fan.example.test/api/v1/fan/rotate', method: 'POST',
     });
-    await Promise.resolve();
+    await new Promise<void>((resolve) => setImmediate(resolve));
     assert.equal(requests[0]?.input, 'http://fan.example.test/state');
     assert.equal(requests[0]?.init?.method, 'GET');
+    assert.equal(rotationCharacteristic(view).value, true);
   } finally {
     globalThis.fetch = originalFetch;
   }
 });
 
-test('rotation Switch is momentary, bodyless, pending ON, and successful 202 returns it OFF', async () => {
+test('rotation Switch reads isRotating and preserves its last state when status omits it', async () => {
   const originalFetch = globalThis.fetch;
-  let resolveRequest!: (response: Response) => void;
+  let status: { isOn: boolean; speed: number; isRotating?: boolean } = {
+    isOn: false,
+    speed: 0,
+    isRotating: true,
+  };
+  globalThis.fetch = async () => new Response(JSON.stringify(status), { status: 200 });
+  try {
+    const view = fixture(undefined, undefined, {}, {
+      uri: 'http://fan.example.test/api/v1/fan/rotate', method: 'POST',
+    });
+    const on = rotationCharacteristic(view);
+    assert.equal(await on.read(), true);
+
+    status = { isOn: false, speed: 0 };
+    assert.equal(await on.read(), true);
+
+    status = { isOn: false, speed: 0, isRotating: false };
+    assert.equal(await on.read(), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('rotation Switch toggles only when requested state differs and keeps accepted state', async () => {
+  const originalFetch = globalThis.fetch;
+  let isRotating = false;
+  const pending: Array<(response: Response) => void> = [];
   const requests: Array<{ input: string; init?: RequestInit }> = [];
   globalThis.fetch = (input, init) => {
     if (init?.method === 'POST') {
       requests.push({ input: String(input), init });
       return new Promise<Response>((resolve) => {
-        resolveRequest = resolve;
+        pending.push(resolve);
       });
     }
-    return Promise.resolve(new Response(JSON.stringify({ isOn: false, speed: 0, isRotating: false }), { status: 200 }));
+    return Promise.resolve(new Response(JSON.stringify({ isOn: false, speed: 0, isRotating }), { status: 200 }));
   };
   try {
     const view = fixture(undefined, undefined, {}, {
@@ -461,17 +488,29 @@ test('rotation Switch is momentary, bodyless, pending ON, and successful 202 ret
     const on = rotationCharacteristic(view);
     await on.write(false);
     assert.equal(requests.length, 0);
-    const write = on.write(true);
-    await Promise.resolve();
+    const startWrite = on.write(true);
+    await new Promise<void>((resolve) => setImmediate(resolve));
     assert.equal(on.value, true);
     assert.equal(requests.length, 1);
     assert.equal(requests[0]?.input, 'http://fan.example.test/api/v1/fan/rotate');
     assert.equal(requests[0]?.init?.method, 'POST');
     assert.equal(requests[0]?.init?.body, undefined);
-    resolveRequest(new Response('ignored response body', { status: 202 }));
-    await write;
+    pending.shift()?.(new Response('ignored response body', { status: 202 }));
+    await startWrite;
+    assert.equal(on.value, true);
+
+    isRotating = true;
+    await on.write(true);
+    assert.equal(requests.length, 1);
+
+    const stopWrite = on.write(false);
+    await new Promise<void>((resolve) => setImmediate(resolve));
     assert.equal(on.value, false);
-    assert.equal(view.logs.info.length, 1);
+    assert.equal(requests.length, 2);
+    pending.shift()?.(new Response('ignored response body', { status: 202 }));
+    await stopWrite;
+    assert.equal(on.value, false);
+    assert.equal(view.logs.info.length, 2);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -500,7 +539,7 @@ test('rotation writes coalesce per fan, failures map to HAP, and a later write r
     const on = rotationCharacteristic(view);
     const first = on.write(true);
     const second = on.write(true);
-    await Promise.resolve();
+    await new Promise<void>((resolve) => setImmediate(resolve));
     assert.equal(calls, 1);
     resolveRequest(new Response('{}', { status: 500 }));
     await Promise.all([
@@ -511,6 +550,7 @@ test('rotation writes coalesce per fan, failures map to HAP, and a later write r
     assert.equal(view.logs.error.length, 1);
     await on.write(true);
     assert.equal(calls, 2);
+    assert.equal(on.value, true);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -536,7 +576,7 @@ test('rotation and reset remain independent on one fan, and cached rotation serv
 
     const resetWrite = resetCharacteristic(view).write(true);
     const rotationWrite = rotationCharacteristic(view).write(true);
-    await Promise.resolve();
+    await new Promise<void>((resolve) => setImmediate(resolve));
     assert.equal(resetCharacteristic(view).value, true);
     assert.equal(rotationCharacteristic(view).value, true);
     pending.get('http://fan.example.test/api/v1/fan/reset')?.(new Response('{}', { status: 202 }));
@@ -575,7 +615,7 @@ test('rotation timeout uses configured value and defaults to five seconds', asyn
     await rotationCharacteristic(fixture(undefined, undefined, {}, {
       uri: 'http://default.example.test/api/v1/fan/rotate', method: 'POST',
     })).write(true);
-    assert.deepEqual(delays, [1234, 1234, 5000, 5000]);
+    assert.deepEqual(delays, [1234, 1234, 1234, 5000, 5000, 5000]);
   } finally {
     globalThis.fetch = originalFetch;
     globalThis.setTimeout = originalSetTimeout;
@@ -603,7 +643,7 @@ test('different fans rotation writes remain independent', async () => {
     });
     const firstWrite = rotationCharacteristic(first).write(true);
     const secondWrite = rotationCharacteristic(second).write(true);
-    await Promise.resolve();
+    await new Promise<void>((resolve) => setImmediate(resolve));
     assert.deepEqual(rotationPosts.sort(), [
       'http://first.example.test/api/v1/fan/rotate',
       'http://second.example.test/api/v1/fan/rotate',
