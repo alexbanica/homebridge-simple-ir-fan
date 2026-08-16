@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 
 import type { FanEndpoints } from '../src/dtos/FanEndpoints.js';
+import { PLATFORM_NAME, PLUGIN_NAME } from '../src/settings.js';
 
 type JsonObject = Record<string, unknown>;
 
@@ -13,6 +14,21 @@ const externalSchema = JSON.parse(readFileSync(join(projectRoot, 'config.schema.
 const packageJson = JSON.parse(readFileSync(join(projectRoot, 'package.json'), 'utf8')) as JsonObject;
 const embeddedSchema = ((packageJson.homebridge as JsonObject).schema as JsonObject).schema as JsonObject;
 const example = JSON.parse(readFileSync(join(projectRoot, 'config.example.json'), 'utf8')) as JsonObject;
+
+test('configuration selects the scoped plugin when the platform alias is duplicated', () => {
+  const packageName = packageJson.name as string;
+  const qualifiedPlatformName = `${packageName}.${PLATFORM_NAME}`;
+  const externalPlatform = ((externalSchema.schema as JsonObject).properties as JsonObject).platform as JsonObject;
+  const homebridge = packageJson.homebridge as JsonObject;
+
+  assert.equal(PLUGIN_NAME, packageName, 'runtime plugin identifier must match package.json');
+  assert.equal(externalSchema.pluginAlias, PLATFORM_NAME);
+  assert.equal(homebridge.alias, PLATFORM_NAME);
+  assert.equal(homebridge.platform, PLATFORM_NAME);
+  assert.equal(externalPlatform.const, qualifiedPlatformName);
+  assert.equal(externalPlatform.default, qualifiedPlatformName);
+  assert.equal(example.platform, qualifiedPlatformName);
+});
 
 const fanEndpointsCompileTimeCheck = {
   getStatus: { uri: 'http://fan.example.test/api/ventilator/state', method: 'GET' },

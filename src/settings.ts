@@ -6,5 +6,4 @@ export const PLATFORM_NAME = 'SimpleIrFan';
 /**
  * This must match the name of your plugin as defined the package.json `name` property
  */
-export const PLUGIN_NAME = 'homebridge-simple-ir-fan';
-
+export const PLUGIN_NAME = '@alexlab/homebridge-simple-ir-fan';

@@ -11,8 +11,8 @@
       "platform": {
         "title": "Platform Identifier",
         "type": "string",
-        "const": "SimpleIrFan",
-        "default": "SimpleIrFan"
+        "const": "@alexlab/homebridge-simple-ir-fan.SimpleIrFan",
+        "default": "@alexlab/homebridge-simple-ir-fan.SimpleIrFan"
       },
       "name": {
         "title": "Name",

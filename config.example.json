@@ -1,5 +1,5 @@
 {
-  "platform": "SimpleIrFan",
+  "platform": "@alexlab/homebridge-simple-ir-fan.SimpleIrFan",
   "name": "SimpleIrFan",
   "devices": [
     {

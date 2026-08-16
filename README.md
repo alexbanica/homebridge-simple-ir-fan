@@ -94,13 +94,17 @@ npm install @alexlab/homebridge-simple-ir-fan@beta --registry https://forgejo.al
 The public identifiers are:
 
 - Plugin: `@alexlab/homebridge-simple-ir-fan`
-- Platform: `SimpleIrFan`
+- Platform alias: `SimpleIrFan`
+- Configured platform identifier: `@alexlab/homebridge-simple-ir-fan.SimpleIrFan`
+
+Use the qualified platform identifier so Homebridge selects this scoped package
+even if the legacy unscoped `homebridge-simple-ir-fan` package is also installed.
 
 See [`config.schema.json`](./config.schema.json) for the Homebridge UI contract and [`config.example.json`](./config.example.json) for a complete example.
 
 ```json
 {
-  "platform": "SimpleIrFan",
+  "platform": "@alexlab/homebridge-simple-ir-fan.SimpleIrFan",
   "name": "SimpleIrFan",
   "devices": [
     {
