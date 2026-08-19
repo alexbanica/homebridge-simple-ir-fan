@@ -117,7 +117,7 @@ function fixture(
     },
     log: { info: (...args: unknown[]) => logs.info.push(args), error: (...args: unknown[]) => logs.error.push(args) },
   };
-  const platform = { api, log: api.log } as never;
+  const platform = { api, log: api.log, refreshAccessoryStatuses: async () => undefined } as never;
   const accessory = new FakeAccessory();
   const device = {
     name: identity.name ?? accessory.displayName, manufacturer: 'Generic', model: 'IR Fan',

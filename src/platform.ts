@@ -10,6 +10,7 @@ export interface SimpleIrFanPlatformConfigInterface extends PlatformConfig {
 
 export class SimpleIrFanPlatform implements DynamicPlatformPlugin {
   public readonly accessories: PlatformAccessory[] = [];
+  private readonly fanAccessories = new Map<string, SimpleIrFanAccessory>();
 
   constructor(
     public readonly log: Logger,
@@ -51,6 +52,18 @@ export class SimpleIrFanPlatform implements DynamicPlatformPlugin {
         ...this.accessories.filter((accessory) => activeUUIDs.has(accessory.UUID)),
       );
     }
+
+    for (const uuid of this.fanAccessories.keys()) {
+      if (!activeUUIDs.has(uuid)) {
+        this.fanAccessories.delete(uuid);
+      }
+    }
+  }
+
+  public async refreshAccessoryStatuses(): Promise<void> {
+    await Promise.allSettled(
+      [...this.fanAccessories.values()].map((fanAccessory) => fanAccessory.refreshStatus()),
+    );
   }
 
   private discoverFanAccessories(activeUUIDs: Set<string>): void {
@@ -61,13 +74,13 @@ export class SimpleIrFanPlatform implements DynamicPlatformPlugin {
       const existing = this.accessories.find((accessory) => accessory.UUID === uuid);
       if (existing) {
         this.log.debug('Restoring existing fan accessory from cache:', existing.displayName);
-        new SimpleIrFanAccessory(this, existing, device);
+        this.fanAccessories.set(uuid, new SimpleIrFanAccessory(this, existing, device));
         continue;
       }
 
       const accessory = new this.api.platformAccessory(device.name, uuid);
       accessory.category = this.api.hap.Categories.FAN;
-      new SimpleIrFanAccessory(this, accessory, device);
+      this.fanAccessories.set(uuid, new SimpleIrFanAccessory(this, accessory, device));
       this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
       this.accessories.push(accessory);
     }

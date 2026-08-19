@@ -7,8 +7,10 @@ type Listener = () => void;
 
 class FakeCharacteristic {
   value: unknown;
+  private setter?: (value: unknown) => void | Promise<void>;
 
-  onSet() {
+  onSet(handler: (value: unknown) => void | Promise<void>) {
+    this.setter = handler;
     return this;
   }
 
@@ -23,6 +25,10 @@ class FakeCharacteristic {
   updateValue(value: unknown) {
     this.value = value;
     return this;
+  }
+
+  async write(value: unknown) {
+    await this.setter?.(value);
   }
 }
 
@@ -180,6 +186,66 @@ test('fans without reset preserve fan registration and expose no reset service',
     assert.equal(view.registered.length, 1);
     assert.ok(view.registered[0].services.has(view.api.hap.Service.Fanv2));
     assert.equal(view.registered[0].services.has(view.api.hap.Service.Switch), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('successful reset refreshes and pushes status for every configured fan accessory', async () => {
+  const originalFetch = globalThis.fetch;
+  const statusRequests: string[] = [];
+  let resetRequests = 0;
+  let refreshed = false;
+  globalThis.fetch = async (input, init) => {
+    const url = String(input);
+    if (init?.method === 'POST') {
+      resetRequests += 1;
+      refreshed = true;
+      return new Response('{}', { status: 202 });
+    }
+    statusRequests.push(url);
+    return new Response(JSON.stringify({
+      isOn: refreshed,
+      speed: refreshed ? (url.includes('bedroom') ? 2 : 1) : 0,
+      isRotating: refreshed,
+    }), { status: 200 });
+  };
+
+  try {
+    const livingRoomFan = fanConfig();
+    const bedroomFan = {
+      ...fanConfig('Bedroom Fan', false, true),
+      serialNumber: 'FAN-002',
+      endpoints: {
+        ...fanConfig('Bedroom Fan', false, true).endpoints,
+        getStatus: { uri: 'http://bedroom.example.test/state', method: 'GET' },
+      },
+    };
+    const view = fixture({ name: 'SimpleIrFan', devices: [livingRoomFan, bedroomFan] });
+    view.launch();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    statusRequests.length = 0;
+
+    const reset = view.registered[0]?.services.get(view.api.hap.Service.Switch);
+    assert.ok(reset);
+    await reset.getCharacteristic(view.api.hap.Characteristic.On).write(true);
+
+    assert.equal(resetRequests, 1);
+    assert.deepEqual(statusRequests.sort(), [
+      'http://bedroom.example.test/state',
+      'http://fan.example.test/state',
+    ]);
+    const livingRoomService = view.registered[0]?.services.get(view.api.hap.Service.Fanv2);
+    const bedroomService = view.registered[1]?.services.get(view.api.hap.Service.Fanv2);
+    assert.equal(livingRoomService?.getCharacteristic(view.api.hap.Characteristic.Active).value, 1);
+    assert.equal(livingRoomService?.getCharacteristic(view.api.hap.Characteristic.RotationSpeed).value, 33);
+    assert.equal(bedroomService?.getCharacteristic(view.api.hap.Characteristic.Active).value, 1);
+    assert.equal(bedroomService?.getCharacteristic(view.api.hap.Characteristic.RotationSpeed).value, 66);
+    assert.equal(
+      view.registered[1]?.services.get(view.api.hap.Service.Switch)
+        ?.getCharacteristic(view.api.hap.Characteristic.On).value,
+      true,
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }

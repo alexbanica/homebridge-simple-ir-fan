@@ -94,6 +94,11 @@ export class SimpleIrFanAccessory {
     this.setRotationCharacteristic(this.rotationSwitchService, this.fanDevice.rotation);
   }
 
+  public async refreshStatus(): Promise<void> {
+    await this.fanService.refresh(this.fanDevice)
+      .finally(() => this.pushStateToHomeKit());
+  }
+
   private async handleGetOn(): Promise<CharacteristicValue> {
     return await this.fanService.isOn(this.fanDevice).finally(() => this.pushStateToHomeKit()) ? 1 : 0;
   }
@@ -259,8 +264,9 @@ export class SimpleIrFanAccessory {
       this.setResetCharacteristic(this.resetSwitchService, true);
       this.resetActionPromise = this.fanResetService!
         .reset()
-        .then(() => {
+        .then(async () => {
           log.info(`${RESET_LOG_PREFIX} completed for ${this.fanNameContext}.`);
+          await this.platform.refreshAccessoryStatuses();
         })
         .catch((error) => {
           log.error(RESET_OFFLINE_ERROR_MESSAGE, this.fanNameContext, error);
