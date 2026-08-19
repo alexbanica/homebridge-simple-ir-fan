@@ -11,6 +11,20 @@ A Homebridge dynamic platform plugin that exposes configurable HTTP-controlled f
 - One stable HomeKit `Switch` service per fan (where configured) for toggling physical fan rotation.
 - Cached accessory restoration and removal of devices no longer present in configuration.
 
+## Delivery status
+
+The qualified scoped-platform identity, per-fan reset switch, API-backed
+rotation state, and Forgejo release tooling are present in branch source.
+Homebridge presentation with both scoped and legacy plugins installed, live
+Device Integration API behavior, Apple Home interaction, and physical fan state
+have not been validated in this repository and remain operator-owned checks.
+
+Reset-status refresh is planned but is not part of branch `latest` or a
+published package. The planned change refreshes every configured fan after an
+accepted reset; treat it as unavailable and live-unverified until it is
+delivered, published, installed, and exercised with Homebridge and the Device
+Integration API.
+
 ## Requirements
 
 - A Homebridge-supported Node.js version.
@@ -72,6 +86,29 @@ a minimal preinstalled tool set, does not require Docker or privileged
 operations for this publish job, and enforces a 15-minute job limit.
 `ubuntu-slim` still needs normal DNS and outbound TCP 443 access to Forgejo
 and npm dependency sources. A self-hosted runner needs the same connectivity.
+
+The publish workflow checks out the exact pushed tag with
+`actions/checkout@v7`, configures a single Node.js 22 job through
+`actions/setup-node@v6`, and installs dependencies from the public npm registry
+without exposing the Forgejo token to dependency scripts. Publication is
+single-job because npm package name and version are immutable; the separate
+build workflow retains its Node.js 18.x, 20.x, and 22.x compatibility matrix.
+The package itself declares Node.js `^20.18.0 || ^22.10.0 || ^24.0.0`, so the
+build workflow's Node.js 18 leg is compatibility automation outside the declared
+runtime range rather than a supported runtime claim.
+
+The publisher rejects missing credentials and malformed tags before npm release
+work. It updates `package.json` and `package-lock.json` only in the ephemeral
+tag checkout, then runs tests, lint, build, and pack. The tarball must identify
+exactly `@alexlab/homebridge-simple-ir-fan` at the release version and contain
+only package metadata, README, license, schema, and generated `dist` content.
+Only `npm publish` receives `NODE_AUTH_TOKEN` and a unique mode-`0600` temporary
+npm configuration containing the exact Forgejo registry mapping; validation,
+build, pack, and public post-publish lookup run with authentication variables
+removed. Temporary authentication data and the packed tarball are cleaned after
+success or failure. Success requires public registry metadata to match the
+package name, version, selected `latest` or `beta` dist-tag, and expected
+scope-stripped registry tarball URL.
 
 The first tag creation, first publish, and first install or verification of the
 published package are operator-owned actions. Until that round trip succeeds,
@@ -155,6 +192,12 @@ The platform exposes one stable momentary `Switch` service on the fan’s own ac
 - Failures are logged and surfaced to HomeKit as `SERVICE_COMMUNICATION_FAILURE` without escaping the plugin boundary.
 - Concurrent ON writes on the same fan for reset reuse one in-flight request.
 - ON writes on different fans are independent.
+- Planned behavior, not included in `latest`: after an accepted reset, the platform refreshes every
+  configured fan in the same platform instance through its own `getStatus`
+  endpoint and pushes Active, speed, and rotation state to HomeKit. Refreshes
+  start concurrently and settle independently; a refresh failure does not turn
+  an already accepted reset into a reset failure. This behavior is unreleased
+  as described in Delivery status.
 
 The reset endpoint must match the full URI with method `POST` and path `/api/v1/fan/reset`.
 It must use `http://` or `https://`, and it must not include a query string, fragment, or embedded credentials.
@@ -200,6 +243,11 @@ npm run prepublishOnly
 ```
 
 Runtime validation requires starting Homebridge with the intended configuration, activating the reset or rotation Switch in Home, and confirming it returns to OFF after the API request settles.
+
+For the pending reset-status-refresh change, also confirm that every configured
+fan tile receives the reset API state. Because the reset endpoint returns HTTP
+`202`, an immediate refresh may briefly observe stale state if the API applies
+the reset asynchronously; a later HomeKit read then supplies a newer status.
 
 ## License
 
